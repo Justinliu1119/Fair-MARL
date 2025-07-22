@@ -603,9 +603,9 @@ class GMPERunner(Runner):
 		time_fairness, time_stddev_param, time_mean = [], [], []
 		print("num_episodes: ", self.all_args.render_episodes)
 
-		with open('/Users/jasmine/Jasmine/MIT/MARL/Codes/Team-Fair-MARL/'+str(self.all_args.model_name)+'_firstgoaldone_nogoal_fair_vs_success.csv', 'a', newline="") as f1:
-			# create the csv writer
-			writer = csv.writer(f1)
+		# with open('/Users/jasmine/Jasmine/MIT/MARL/Codes/Team-Fair-MARL/'+str(self.all_args.model_name)+'_firstgoaldone_nogoal_fair_vs_success.csv', 'a', newline="") as f1:
+		# 	# create the csv writer
+		# 	writer = csv.writer(f1)
 
 
 		for episode in range(self.all_args.render_episodes):

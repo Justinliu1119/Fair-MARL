@@ -172,7 +172,7 @@ def main(args):
         run = wandb.init(config=all_args,
                         project=all_args.project_name,
                         # project=all_args.env_name,
-                        entity=all_args.user_name,
+                        entity="fair_marl",
                         notes=socket.gethostname(),
                         name=str(all_args.algorithm_name) + "_" +
                         str(all_args.experiment_name) +
