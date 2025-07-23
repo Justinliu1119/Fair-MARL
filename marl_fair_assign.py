@@ -1,4 +1,5 @@
 import numpy as np
+import cvxpy as cp
 import pyomo.environ as pe
 import scipy.spatial.distance as dist
 
@@ -18,6 +19,7 @@ def solve_fair_assignment(costs):
 
     costs - matrix of costs where entry [i,j] is the cost for agent i to perform task j
     '''
+    import logging
     n, nj = costs.shape
     cost_helper = np.copy(costs)
     m = build_base_model(costs)
@@ -31,8 +33,33 @@ def solve_fair_assignment(costs):
     objs = []
 
     for iter in range(n):
-        solver.solve(options={'TimeLimit': 60}, save_results=True)
-        x = np.array(pe.value(m.x[:,:])).reshape((n,nj)).astype(int)
+        results = solver.solve(options={'TimeLimit': 60}, save_results=True)
+        # Logging solver status and termination condition
+        print(f"[solve_fair_assignment] Iter {iter+1}/{n}:")
+        print("  Costs matrix:\n", costs)
+        print("  Solver status:", results.solver.status)
+        print("  Termination condition:", results.solver.termination_condition)
+
+        # Check for infeasibility or unboundedness
+        if (results.solver.termination_condition == pe.TerminationCondition.infeasible) or \
+           (results.solver.termination_condition == pe.TerminationCondition.infeasibleOrUnbounded) or \
+           (results.solver.termination_condition == pe.TerminationCondition.unbounded):
+            raise RuntimeError(
+                f"Fair assignment infeasible or unbounded! "
+                f"Costs:\n{costs}\n"
+                f"Status: {results.solver.status}, "
+                f"Termination: {results.solver.termination_condition}"
+            )
+
+        x_val = pe.value(m.x[:,:])
+        if x_val is None:
+            raise RuntimeError(
+                f"Solver did not return a solution (NoneType). Costs:\n{costs}\n"
+                f"Status: {results.solver.status}, "
+                f"Termination: {results.solver.termination_condition}"
+            )
+
+        x = np.array(x_val).reshape((n, nj)).astype(int)
         obj = pe.value(m.obj)
 
         objs.append(obj)
@@ -43,7 +70,7 @@ def solve_fair_assignment(costs):
         for constr in m.aux.values():
             solver.remove_constraint(constr)
         m.del_component(m.aux)
-        m.del_component(m.aux_index)
+        
         m.aux = pe.Constraint(m.ns, m.ms, rule=lambda m,i,j: cost_helper[i,j]*m.x[i,j] <= m.z)
         for constr in m.aux.values():
             solver.add_constraint(constr)
@@ -53,6 +80,57 @@ def solve_fair_assignment(costs):
 
     objs = np.sort(np.sum(costs*x, axis=1))[::-1]
     return x, objs
+
+def solve_eg_assignment(preference, cost, agent_types, goal_types, budgets=None, distance_weight=1.0, verbose=False):
+    '''
+    Solves the Eisenberg-Gale (EG) goal assignment problem using cvxpy.
+
+    Args:
+        preference: (agent_types x goal_types) preference matrix, e.g., preference[a_type, g_type]
+        cost: (n_agents x n_goals) matrix, e.g., distance or cost between each agent and goal
+        agent_types: (n_agents,) array-like, agent type for each agent (integer index)
+        goal_types: (n_goals,) array-like, goal type for each goal (integer index)
+        budgets: (n_agents,) array-like, optional, budget for each agent (default: all ones)
+        distance_weight: float, penalty weight for cost
+        verbose: print assignment & utilities
+
+    Returns:
+        x: assignment matrix (n_agents x n_goals), binary
+        utilities: array of each agent's achieved utility
+    '''
+    n_agents, n_goals = cost.shape
+    # Compute utility matrix
+    utility = np.zeros((n_agents, n_goals))
+    for i in range(n_agents):
+        for j in range(n_goals):
+            utility[i, j] = preference[agent_types[i], goal_types[j]] - distance_weight * cost[i, j]
+
+    if budgets is None:
+        budgets = np.ones(n_agents)
+    else:
+        budgets = np.array(budgets)
+
+    # Assignment variable: binary matrix
+    x = cp.Variable((n_agents, n_goals), boolean=True)
+    u = cp.sum(cp.multiply(utility, x), axis=1)  # Utility per agent
+
+    obj = cp.Maximize(cp.sum(cp.multiply(budgets, cp.log(u + 1e-6))))
+
+    constraints = [
+        cp.sum(x, axis=0) == 1,  # Each goal assigned to one agent
+        cp.sum(x, axis=1) == 1,  # Each agent gets one goal
+    ]
+
+    prob = cp.Problem(obj, constraints)
+    prob.solve(solver=cp.SCIP, verbose=verbose)  # Or any suitable MILP solver
+
+    x_val = np.rint(x.value).astype(int)
+    utilities = u.value
+
+    if verbose:
+        print("EG Assignment Matrix:\n", x_val)
+        print("Agent Utilities (EG):\n", utilities)
+    return x_val, utilities
 
 if __name__=='__main__':
     # n = 10

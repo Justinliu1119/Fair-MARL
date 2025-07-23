@@ -136,6 +136,9 @@ class Scenario(BaseScenario):
 			agent.max_speed = self.max_speed
 		# add landmarks (goals)
 		world.landmarks = [Landmark() for i in range(self.num_landmarks)]
+		for i, landmark in enumerate(world.landmarks):
+			if not hasattr(landmark, "state") or not hasattr(landmark.state, "p_pos"):
+				print(f"[ERROR] Landmark {i} has no state or p_pos at initialization! landmark={landmark}")
 		world.scripted_agents_goals = [Landmark() for i in range(num_scripted_agents_goals)]
 		for i, landmark in enumerate(world.landmarks):
 			landmark.id = i
