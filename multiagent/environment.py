@@ -488,6 +488,16 @@ class MultiAgentBaseEnv(gym.Env):
 							self.comm_geoms[e][ci].set_color(
 								color, color, color)
 
+			# add agent and goal labels
+			for entity in self.world.entities:
+				pos = entity.state.p_pos
+				if 'agent' in entity.name:
+					label = f"{entity.name}"
+					self.viewers[i].draw_text(label, x=pos[0] + 0.05, y=pos[1] + 0.05, font_size=10, color=(0, 0, 0, 1))
+				elif 'landmark' in entity.name or 'goal' in entity.name:
+					label = f"{entity.name}"
+					self.viewers[i].draw_text(label, x=pos[0] + 0.05, y=pos[1] + 0.05, font_size=10, color=(0.3, 0.3, 0.8, 1))
+
 			# render the graph connections
 			if hasattr(self.world, 'graph_mode'):
 				if self.world.graph_mode:

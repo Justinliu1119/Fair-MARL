@@ -78,6 +78,7 @@ class Entity(object):
 class Landmark(Entity):
     def __init__(self):
         super(Landmark, self).__init__()
+        self.preference_vector = None
 
 # properties of agent entities
 class Agent(Entity):

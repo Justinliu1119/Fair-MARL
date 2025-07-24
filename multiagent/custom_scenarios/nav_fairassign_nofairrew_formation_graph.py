@@ -16,6 +16,7 @@ sys.path.append(os.path.abspath(os.getcwd()))
 from scipy.optimize import linear_sum_assignment
 
 from marl_fair_assign import solve_fair_assignment
+from marl_fair_assign import solve_eg_assignment
 
 from multiagent.core import World, Agent, Landmark, Entity, Wall
 from multiagent.scenario import BaseScenario
@@ -24,6 +25,8 @@ entity_mapping = {'agent': 0, 'landmark': 1, 'obstacle':2, 'wall':3}
 
 class Scenario(BaseScenario):
 	def make_world(self, args:argparse.Namespace) -> World:
+		# Ensure num_targets_per_type is defined
+		args.num_targets_per_type = args.num_landmarks // 2
 		"""
 			Parameters in args
 			––––––––––––––––––
@@ -103,6 +106,11 @@ class Scenario(BaseScenario):
 			self.max_edge_dist = args.max_edge_dist
 		####################
 		world = World()
+		# ------------------- Preference matrix for 2 types -------------------
+		# Define preferences: each goal type's preference vector
+		preference_matrix = np.array([[2, 1], [1, 3]])
+		world.preference_matrix = preference_matrix
+		# -------------------------------------------------------------------------------
 		# graph related attributes
 		world.cache_dists = True # cache distance between all entities
 		world.graph_mode = True
@@ -125,7 +133,7 @@ class Scenario(BaseScenario):
 		world.scripted_agents = [Agent() for _ in range(self.num_scripted_agents)]
 		for i, agent in enumerate(world.agents + world.scripted_agents):
 			agent.id = i
-			agent.name = f'agent {i}'
+			agent.name = f"Agent {i}"
 			agent.collide = True
 			agent.silent = True
 			agent.global_id = global_id
@@ -134,11 +142,22 @@ class Scenario(BaseScenario):
 			# TODO have to change this later
 			# agent.size = 0.15
 			agent.max_speed = self.max_speed
+			# Assign agent type (e.g., 0 if i < num_agents // 2 else 1)
+			agent.type = 0 if i < self.num_agents // 2 else 1
 		# add landmarks (goals)
 		world.landmarks = [Landmark() for i in range(self.num_landmarks)]
 		for i, landmark in enumerate(world.landmarks):
 			if not hasattr(landmark, "state") or not hasattr(landmark.state, "p_pos"):
 				print(f"[ERROR] Landmark {i} has no state or p_pos at initialization! landmark={landmark}")
+		# Assign goal_type and preference vectors to each landmark (goal)
+		for i, landmark in enumerate(world.landmarks):
+			landmark.goal_type = 0 if i < args.num_targets_per_type else 1
+			landmark.preference_vector = preference_matrix[landmark.goal_type]
+		# Inserted loop to assign goal_type after all landmarks have been added
+		num_targets_per_type = args.num_targets_per_type
+		for i, landmark in enumerate(world.landmarks):
+			landmark.goal_type = 0 if i < num_targets_per_type else 1
+
 		world.scripted_agents_goals = [Landmark() for i in range(num_scripted_agents_goals)]
 		for i, landmark in enumerate(world.landmarks):
 			landmark.id = i
@@ -417,24 +436,31 @@ class Scenario(BaseScenario):
 		world.calculate_distances()
 		self.update_graph(world)
 		####################################################
-		
 
 		# reset
 		########### set fair goals for each agent ###########
-		costs = dist.cdist(agent_pos, self.landmark_poses)
-		x, objs = solve_fair_assignment(costs)
-		# print('x',x)
+		# Define variables for assignment
+		# Correct references to agent.type and landmark.goal_type
+		preference_matrix = np.array([[2.0, 1.0], [1.0, 2.0]])
+		agent_type_list = [agent.type for agent in world.agents]
+		goal_type_list = [goal.goal_type for goal in world.landmarks]
+		dist_matrix = np.linalg.norm(
+			np.array([agent.state.p_pos for agent in world.agents])[:, None, :] -
+			np.array([goal.state.p_pos for goal in world.landmarks])[None, :, :],
+			axis=2
+		)
+		x = solve_eg_assignment(
+			preference=world.preference_matrix,
+			cost=dist_matrix,
+			agent_types=agent_type_list,
+			goal_types=goal_type_list,
+			budgets=[1.0] * len(world.agents),
+			distance_weight=1.0,
+			verbose=False
+		)
 		self.goal_match_index = np.where(x==1)[1]
-		# print("hi goal_match_index",self.goal_match_index,  np.where(x==1))
 		if self.goal_match_index.size == 0 or self.goal_match_index.shape != (self.num_agents,):
-			# print("goal_match_index",self.goal_match_index)
 			self.goal_match_index = np.arange(self.num_agents)
-		## print(x,goal_match_index,agent.id, goal_match_index[0], goal_match_index[1], goal_match_index[2])
-		# print("goalmatch",self.goal_match_index,agent.id)
-		# color_list= [np.array([0.35, 0.35, 0.85]),np.array([0.85, 0.35, 0.35]),np.array([0.35, 0.85, 0.35])]
-		# for i, agent in enumerate(world.agents):
-		# 	# landmark.color = np.array([0.15, 0.85, 0.15])
-		# 	agent.color = color_list[self.goal_match_index[i]%3]
 
 	def info_callback(self, agent:Agent, world:World) -> Tuple:
 		# TODO modify this 
@@ -1126,7 +1152,10 @@ class Scenario(BaseScenario):
 		rel_pos = entity_pos - agent_pos
 		rel_vel = entity_vel - agent_vel
 		# print("entity", entity.name, "rel_pos", rel_pos, "rel_vel", rel_vel)
-		if 'agent' in entity.name:
+		# Special handling for entities whose names start with "agent"
+		name = entity.name.lower()
+
+		if 'agent' in name:
 			world.dists = np.array([np.linalg.norm(entity.state.p_pos - l) for l in self.landmark_poses])
 			min_dist = np.min(world.dists)
 			if min_dist < self.min_obs_dist:
@@ -1192,14 +1221,14 @@ class Scenario(BaseScenario):
 
 			rel_goal_pos = goal_pos - agent_pos
 			entity_type = entity_mapping['agent']
-		elif 'landmark' in entity.name:
+		elif 'landmark' in name:
 			rel_goal_pos = rel_pos
 			goal_occupied = np.array([1])
 			goal_history = entity.id if entity.id != None else 0
 
 			# rel_goal_pos = np.repeat(rel_pos, self.num_landmarks)
 			entity_type = entity_mapping['landmark']
-		elif 'obstacle' in entity.name:
+		elif 'obstacle' in name:
 			rel_goal_pos = rel_pos
 			goal_occupied = np.array([1])
 			goal_history = entity.id if entity.id != None else 0

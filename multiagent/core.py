@@ -62,6 +62,7 @@ class Entity(object):
         # id
         self.id = None
         self.global_id = None
+        self.preference_vector = None
         # name 
         self.name = ''
         # properties:
@@ -94,11 +95,14 @@ class Entity(object):
 class Landmark(Entity):
     def __init__(self):
         super(Landmark, self).__init__()
+        self.preference_vector = None
 
 # properties of agent entities
 class Agent(Entity):
     def __init__(self):
         super(Agent, self).__init__()
+        # agent type
+        self.type = None 
         # agent are adversary
         self.adversary = False
         # agent are dummy

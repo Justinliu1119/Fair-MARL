@@ -82,6 +82,8 @@ def solve_fair_assignment(costs):
     return x, objs
 
 def solve_eg_assignment(preference, cost, agent_types, goal_types, budgets=None, distance_weight=1.0, verbose=False):
+    
+    n_agents, n_goals = cost.shape
     '''
     Solves the Eisenberg-Gale (EG) goal assignment problem using cvxpy.
 
@@ -98,8 +100,6 @@ def solve_eg_assignment(preference, cost, agent_types, goal_types, budgets=None,
         x: assignment matrix (n_agents x n_goals), binary
         utilities: array of each agent's achieved utility
     '''
-    n_agents, n_goals = cost.shape
-    # Compute utility matrix
     utility = np.zeros((n_agents, n_goals))
     for i in range(n_agents):
         for j in range(n_goals):
@@ -107,30 +107,43 @@ def solve_eg_assignment(preference, cost, agent_types, goal_types, budgets=None,
 
     if budgets is None:
         budgets = np.ones(n_agents)
-    else:
-        budgets = np.array(budgets)
 
-    # Assignment variable: binary matrix
-    x = cp.Variable((n_agents, n_goals), boolean=True)
-    u = cp.sum(cp.multiply(utility, x), axis=1)  # Utility per agent
+    x = cp.Variable((n_goals, n_agents), nonneg=True)  # match original shape (m x n)
 
-    obj = cp.Maximize(cp.sum(cp.multiply(budgets, cp.log(u + 1e-6))))
+    objective = cp.Maximize(
+        cp.sum([
+            budgets[goal_types[j]] * cp.log(cp.sum(cp.multiply(utility[j], x[j])) + 1e-6)
+            for j in range(n_goals)
+        ])
+    )
 
     constraints = [
-        cp.sum(x, axis=0) == 1,  # Each goal assigned to one agent
-        cp.sum(x, axis=1) == 1,  # Each agent gets one goal
+        cp.sum(x[:, t]) <= 1  # agent t has limited total assignment
+        for t in range(n_agents)
     ]
 
-    prob = cp.Problem(obj, constraints)
-    prob.solve(solver=cp.SCIP, verbose=verbose)  # Or any suitable MILP solver
+    prob = cp.Problem(objective, constraints)
+    prob.solve()
 
-    x_val = np.rint(x.value).astype(int)
-    utilities = u.value
+    if x.value is None:
+        raise RuntimeError("❌ CVXPY solver failed. x.value is None.")
 
-    if verbose:
-        print("EG Assignment Matrix:\n", x_val)
-        print("Agent Utilities (EG):\n", utilities)
-    return x_val, utilities
+    x_val = np.asarray(x.value)
+    print("x_val shape:", x_val)
+
+    # Safe reshape if needed
+    if x_val.ndim == 1:
+        try:
+            x_val = x_val.reshape((n_agents, n_goals))
+            print("✅ Reshaped x_val to:", x_val.shape)
+        except Exception as e:
+            raise RuntimeError(f"❌ Failed to reshape x_val: {e}, original shape: {x_val.shape}")
+
+    x_onehot = np.zeros_like(x_val)
+    x_onehot[np.arange(n_agents), np.argmax(x_val, axis=1)] = 1
+    print("one_hot shape:", x_onehot)
+
+    return x_onehot
 
 if __name__=='__main__':
     # n = 10

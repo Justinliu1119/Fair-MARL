@@ -54,6 +54,7 @@ class Viewer(object):
         self.geoms = []
         self.onetime_geoms = []
         self.transform = Transform()
+        self.labels = []
 
         glEnable(GL_BLEND)
         # glEnable(GL_MULTISAMPLE)
@@ -112,9 +113,26 @@ class Viewer(object):
             # than the requested one.
             arr = arr.reshape(buffer.height, buffer.width, 4)
             arr = arr[::-1,:,0:3]
+        # Draw text labels before flipping
+        for text, x, y, font_size, color in self.labels:
+            label = pyglet.text.Label(
+                text,
+                font_size=font_size,
+                x=int(self.transform.scale[0] * x + self.transform.translation[0]),
+                y=int(self.transform.scale[1] * y + self.transform.translation[1]),
+                anchor_x='center', anchor_y='center',
+                color=(int(color[0]*255), int(color[1]*255), int(color[2]*255), int(color[3]*255))
+            )
+            label.draw()
+        self.labels = []
         self.window.flip()
         self.onetime_geoms = []
         return arr
+
+    def draw_text(self, text, x, y, font_size=12, color=(0, 0, 0, 1)):
+        if not hasattr(self, 'labels'):
+            self.labels = []
+        self.labels.append((text, x, y, font_size, color))
 
     # Convenience
     def draw_circle(self, radius=10, res=30, filled=True, **attrs):
@@ -148,6 +166,8 @@ class Viewer(object):
         arr = np.fromstring(image_data.data, dtype=np.uint8, sep='')
         arr = arr.reshape(self.height, self.width, 4)
         return arr[::-1,:,0:3]
+    
+
 
 def _add_attrs(geom, attrs):
     if "color" in attrs:
@@ -273,6 +293,7 @@ def make_capsule(length, width):
     circ1.add_attr(Transform(translation=(length, 0)))
     geom = Compound([box, circ0, circ1])
     return geom
+
 
 class Compound(Geom):
     def __init__(self, gs):
