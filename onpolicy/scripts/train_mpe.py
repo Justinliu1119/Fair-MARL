@@ -7,6 +7,7 @@ import setproctitle
 import numpy as np
 from pathlib import Path
 import torch
+from tqdm import tqdm
 
 import os,sys
 sys.path.append(os.path.abspath(os.getcwd()))
@@ -208,6 +209,8 @@ def main(args):
 
     # env init
     envs = make_train_env(all_args)
+    # tqdm progress bar for training steps
+    pbar = tqdm(total=all_args.num_env_steps, desc="📊 Training Progress", ncols=80)
     eval_envs = make_eval_env(all_args) if all_args.use_eval else None
     num_agents = all_args.num_agents
 
@@ -217,7 +220,8 @@ def main(args):
         "eval_envs": eval_envs,
         "num_agents": num_agents,
         "device": device,
-        "run_dir": run_dir
+        "run_dir": run_dir,
+        "pbar": pbar
     }
 
     # run experiments
@@ -242,8 +246,12 @@ def main(args):
             print_box(runner.policy.actor, 80)
             print_box('Critic Network', 80)
             print_box(runner.policy.critic, 80)
+
+
     runner.run()
-    
+    pbar.close()
+
+   
     # post process
     envs.close()
     if all_args.use_eval and eval_envs is not envs:
