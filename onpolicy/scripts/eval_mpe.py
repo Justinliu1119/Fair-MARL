@@ -142,6 +142,8 @@ def main(args):
 
     # env init
     envs = make_render_env(all_args)
+    all_args.obs_shape = envs.observation_space[0].shape[0]
+    print("[DEBUG] Inferred obs_shape from environment:", all_args.obs_shape)
     eval_envs = None
     num_agents = all_args.num_agents
     run_dir = None

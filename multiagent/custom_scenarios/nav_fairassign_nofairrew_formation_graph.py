@@ -442,9 +442,8 @@ class Scenario(BaseScenario):
 		# reset
 		########### set fair goals for each agent ###########
 		# Define variables for assignment
-		# Correct references to agent.type and landmark.goal_type
 		preference_matrix = np.array([[3.0, 1.0], [1.0, 2.0]])
-		agent_type_list = [agent.type for agent in world.agents]
+		agent_type_list = [agent.agent_type for agent in world.agents]
 		goal_type_list = [goal.goal_type for goal in world.landmarks]
 		dist_matrix = np.linalg.norm(
 			np.array([agent.state.p_pos for agent in world.agents])[:, None, :] -
