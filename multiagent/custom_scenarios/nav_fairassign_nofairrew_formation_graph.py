@@ -108,7 +108,8 @@ class Scenario(BaseScenario):
 		world = World()
 		# ------------------- Preference matrix for 2 types -------------------
 		# Define preferences: each goal type's preference vector
-		preference_matrix = np.array([[2, 1], [1, 3]])
+		preference_matrix = np.array([[2, 1], 
+										[1, 3]])
 		world.preference_matrix = preference_matrix
 		# -------------------------------------------------------------------------------
 		# graph related attributes
@@ -131,6 +132,7 @@ class Scenario(BaseScenario):
 		global_id = 0
 		world.agents = [Agent() for i in range(self.num_agents)]
 		world.scripted_agents = [Agent() for _ in range(self.num_scripted_agents)]
+		num_agents_per_type = self.num_agents // 2  # for type assignment
 		for i, agent in enumerate(world.agents + world.scripted_agents):
 			agent.id = i
 			agent.name = f"Agent {i}"
@@ -142,8 +144,8 @@ class Scenario(BaseScenario):
 			# TODO have to change this later
 			# agent.size = 0.15
 			agent.max_speed = self.max_speed
-			# Assign agent type (e.g., 0 if i < num_agents // 2 else 1)
-			agent.type = 0 if i < self.num_agents // 2 else 1
+			# Assign agent_type (e.g., 0 if i < num_agents_per_type else 1)
+			agent.agent_type = 0 if i < num_agents_per_type else 1
 		# add landmarks (goals)
 		world.landmarks = [Landmark() for i in range(self.num_landmarks)]
 		for i, landmark in enumerate(world.landmarks):
@@ -455,7 +457,7 @@ class Scenario(BaseScenario):
 			agent_types=agent_type_list,
 			goal_types=goal_type_list,
 			budgets=[1.0] * len(world.agents),
-			distance_weight=0.8,
+			distance_weight=0.9,
 			verbose=False
 		)
 		self.goal_match_index = np.where(x==1)[1]
@@ -917,11 +919,13 @@ class Scenario(BaseScenario):
 		# Add goal type information
 		matched_goal_index = self.goal_match_index[agent.id]
 		goal_type = np.array([world.landmarks[matched_goal_index].goal_type])
+		# Add agent_type information
+		agent_type = np.array([agent.agent_type])
 		# print("FLAGS",self.landmark_poses_occupied)
 		# first_index = np.where((self.landmark_poses == agents_goal).all(axis=1))[0]
 		# second_index = np.where((self.landmark_poses == second_closest_goal).all(axis=1))[0]
 		# print("agent", agent.id,"goal_pos",first_index,"second_closest_goal",second_index,"goal_occupied",np.round(goal_occupied,4), "min_dist",min_dist, "second_closest_goal_occupied",np.round(second_closest_goal_occupied,4))
-		return np.concatenate((agent.state.p_vel, agent.state.p_pos, goal_pos,goal_occupied,goal_history, rel_second_closest_goal,second_closest_goal_occupied, goal_type))
+		return np.concatenate((agent.state.p_vel, agent.state.p_pos, goal_pos, goal_occupied, goal_history, rel_second_closest_goal, second_closest_goal_occupied, goal_type, agent_type))
 
 
 		# if world.dists_to_goal[agent.id] == -1:
