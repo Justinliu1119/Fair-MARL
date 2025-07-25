@@ -450,7 +450,7 @@ class Scenario(BaseScenario):
 			axis=2
 		)
 		x = solve_eg_assignment(
-			preference=world.preference_matrix,
+			preference=preference_matrix,
 			cost=dist_matrix,
 			agent_types=agent_type_list,
 			goal_types=goal_type_list,
@@ -796,7 +796,6 @@ class Scenario(BaseScenario):
 			chosen_goal = np.argmin(world.dists)
 			agents_goal = self.landmark_poses[chosen_goal]
 
-
 			## check if any agent have left goals to go to other goals
 			# check which agents among the world.dists are less than self.min_obs_dist
 			# find which goals are within self.min_obs_dist and unoccupied
@@ -887,7 +886,6 @@ class Scenario(BaseScenario):
 				# # print("ri",agents,"ci",goals)
 				# agents_goal = self.landmark_poses[goals[agent.id]]
 
-
 				## use closest goal
 				# print("unoccupied_goals",unoccupied_goals)
 				# print(np.argmin(np.linalg.norm(agent.state.p_pos - unoccupied_goals, axis=1)), unoccupied_goals[np.argmin(np.linalg.norm(agent.state.p_pos - unoccupied_goals, axis=1))])
@@ -916,11 +914,14 @@ class Scenario(BaseScenario):
 		rel_second_closest_goal = second_closest_goal - agent.state.p_pos
 
 		goal_history = np.array([goal_history])
+		# Add goal type information
+		matched_goal_index = self.goal_match_index[agent.id]
+		goal_type = np.array([world.landmarks[matched_goal_index].goal_type])
 		# print("FLAGS",self.landmark_poses_occupied)
 		# first_index = np.where((self.landmark_poses == agents_goal).all(axis=1))[0]
 		# second_index = np.where((self.landmark_poses == second_closest_goal).all(axis=1))[0]
 		# print("agent", agent.id,"goal_pos",first_index,"second_closest_goal",second_index,"goal_occupied",np.round(goal_occupied,4), "min_dist",min_dist, "second_closest_goal_occupied",np.round(second_closest_goal_occupied,4))
-		return np.concatenate((agent.state.p_vel, agent.state.p_pos, goal_pos,goal_occupied,goal_history, rel_second_closest_goal,second_closest_goal_occupied))
+		return np.concatenate((agent.state.p_vel, agent.state.p_pos, goal_pos,goal_occupied,goal_history, rel_second_closest_goal,second_closest_goal_occupied, goal_type))
 
 
 		# if world.dists_to_goal[agent.id] == -1:
