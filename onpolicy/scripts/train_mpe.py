@@ -75,6 +75,8 @@ def parse_args(args, parser):
     parser.add_argument('--num_landmarks', type=int, default=3)
     parser.add_argument('--num_agents', type=int, default=2, 
                         help="number of players")
+    parser.add_argument('--num_agent_types', type=int, default=2, help="Number of agent types")
+    parser.add_argument('--num_landmark_types', type=int, default=2, help="Number of goal (landmark) types")
     parser.add_argument('--num_obstacles', type=int, default=3, 
                         help="Number of obstacles")
     parser.add_argument("--collaborative", type=lambda x:bool(strtobool(x)), 

@@ -74,6 +74,8 @@ class Scenario(BaseScenario):
 		# pull params from args
 		self.world_size = args.world_size
 		self.num_agents = args.num_agents
+		self.num_agent_types = args.num_agent_types
+		self.num_landmark_types = args.num_landmark_types
 		self.num_scripted_agents = args.num_scripted_agents
 		self.num_obstacles = args.num_obstacles
 		self.collaborative = args.collaborative
@@ -144,8 +146,8 @@ class Scenario(BaseScenario):
 			# TODO have to change this later
 			# agent.size = 0.15
 			agent.max_speed = self.max_speed
-			# Assign agent_type (e.g., 0 if i < num_agents_per_type else 1)
-			agent.agent_type = 0 if i < num_agents_per_type else 1
+			# Assign agent_type
+			agent.agent_type = i % self.num_agent_types
 		# add landmarks (goals)
 		world.landmarks = [Landmark() for i in range(self.num_landmarks)]
 		for i, landmark in enumerate(world.landmarks):
@@ -153,12 +155,12 @@ class Scenario(BaseScenario):
 				print(f"[ERROR] Landmark {i} has no state or p_pos at initialization! landmark={landmark}")
 		# Assign goal_type and preference vectors to each landmark (goal)
 		for i, landmark in enumerate(world.landmarks):
-			landmark.goal_type = 0 if i < args.num_targets_per_type else 1
-			landmark.preference_vector = preference_matrix[landmark.goal_type]
+			landmark.landmark_type = i % self.num_landmark_types
+			landmark.preference_vector = preference_matrix[landmark.landmark_type]
 		# Inserted loop to assign goal_type after all landmarks have been added
 		num_targets_per_type = args.num_targets_per_type
 		for i, landmark in enumerate(world.landmarks):
-			landmark.goal_type = 0 if i < num_targets_per_type else 1
+			landmark.landmark_type = i % self.num_landmark_types
 
 		world.scripted_agents_goals = [Landmark() for i in range(num_scripted_agents_goals)]
 		for i, landmark in enumerate(world.landmarks):
@@ -444,7 +446,7 @@ class Scenario(BaseScenario):
 		# Define variables for assignment
 		preference_matrix = np.array([[3.0, 1.0], [1.0, 2.0]])
 		agent_type_list = [agent.agent_type for agent in world.agents]
-		goal_type_list = [goal.goal_type for goal in world.landmarks]
+		goal_type_list = [goal.landmark_type for goal in world.landmarks]
 		dist_matrix = np.linalg.norm(
 			np.array([agent.state.p_pos for agent in world.agents])[:, None, :] -
 			np.array([goal.state.p_pos for goal in world.landmarks])[None, :, :],
@@ -917,14 +919,14 @@ class Scenario(BaseScenario):
 		goal_history = np.array([goal_history])
 		# Add goal type information
 		matched_goal_index = self.goal_match_index[agent.id]
-		goal_type = np.array([world.landmarks[matched_goal_index].goal_type])
+		landmark_type = np.array([world.landmarks[matched_goal_index].landmark_type])
 		# Add agent_type information
 		agent_type = np.array([agent.agent_type])
 		# print("FLAGS",self.landmark_poses_occupied)
 		# first_index = np.where((self.landmark_poses == agents_goal).all(axis=1))[0]
 		# second_index = np.where((self.landmark_poses == second_closest_goal).all(axis=1))[0]
 		# print("agent", agent.id,"goal_pos",first_index,"second_closest_goal",second_index,"goal_occupied",np.round(goal_occupied,4), "min_dist",min_dist, "second_closest_goal_occupied",np.round(second_closest_goal_occupied,4))
-		return np.concatenate((agent.state.p_vel, agent.state.p_pos, goal_pos, goal_occupied, goal_history, rel_second_closest_goal, second_closest_goal_occupied, goal_type, agent_type))
+		return np.concatenate((agent.state.p_vel, agent.state.p_pos, goal_pos, goal_occupied, goal_history, rel_second_closest_goal, second_closest_goal_occupied, landmark_type, agent_type))
 
 
 		# if world.dists_to_goal[agent.id] == -1:
@@ -1006,7 +1008,7 @@ class Scenario(BaseScenario):
 			count +=1
 		return goal_pos
 
-	def graph_observation(self, agent:Agent, world:World) -> Tuple[arr, arr]:
+	def graph_observation(self, agent:Agent, world:World) -> Tuple[arr, arr, np.ndarray]:
 		"""
 			FIXME: Take care of the case where edge_list is empty
 			Returns: [node features, adjacency matrix]
@@ -1100,6 +1102,12 @@ class Scenario(BaseScenario):
 		node_obs = np.array(node_obs)
 		adj = world.cached_dist_mag
 
+		# Compute agent-specific preference vector for landmarks
+		agent_type = agent.agent_type
+		preference_vector = world.preference_matrix[agent_type]
+		landmark_types = [l.landmark_type for l in world.landmarks]
+		pref_per_landmark = np.array([preference_vector[t] for t in landmark_types])
+
 		return node_obs, adj
 
 	def update_graph(self, world:World):
@@ -1142,7 +1150,9 @@ class Scenario(BaseScenario):
 		else:
 			raise ValueError(f'{entity.name} not supported')
 
-		return np.hstack([vel, pos, goal_pos, entity_type])
+		agent_type = getattr(entity, 'agent_type', -1)
+		landmark_type = getattr(entity, 'landmark_type', -1)
+		return np.hstack([vel, pos, goal_pos, agent_type, landmark_type, entity_type])
 
 	def _get_entity_feat_relative(self, agent:Agent, entity:Entity, world:World, fairness_param: np.ndarray) -> arr:
 		"""
@@ -1166,100 +1176,52 @@ class Scenario(BaseScenario):
 				# If the minimum distance is already less than self.min_dist_thresh, use the previous goal.
 				chosen_goal = np.argmin(world.dists)
 				goal_pos = self.landmark_poses[chosen_goal]
-				# if min_dist < self.min_dist_thresh:
-				# 	self.landmark_poses_occupied[chosen_goal] = 1
-				# 	# print("gr AT GOAL",entity.id,np.min(world.dists), "goal_occupied",self.landmark_poses_occupied[chosen_goal])
-
-				# else:
-
-				# 	# another agent already at goal, can't overwrite the flag
-				# 	if self.landmark_poses_occupied[chosen_goal] != 1.0:
-				# 		self.landmark_poses_occupied[chosen_goal] = 1.0-min_dist
-					# print("gr CLOSE",entity.id, np.min(world.dists), "goal_occupied",self.landmark_poses_occupied[chosen_goal])
-
-				# self.landmark_poses_occupied[chosen_goal] = 1
 				goal_history = self.goal_history[chosen_goal]
-
 				goal_occupied = np.array([self.landmark_poses_occupied[chosen_goal]])
-
 			else:
 				unoccupied_goals = self.landmark_poses[self.landmark_poses_occupied!= 1]
-				# print("graph unoccupied_goals",unoccupied_goals)
 				unoccupied_goals_indices = np.where(self.landmark_poses_occupied != 1)[0]
-				# print("graph unoccupied_goals_indices",unoccupied_goals_indices)
 				if len(unoccupied_goals) > 0:
-					# # if goals are unoccupied, match based on bipartite matching
-					# self.dists = np.array(
-					# [
-					# 	[np.linalg.norm(a.state.p_pos - pos) for pos in self.landmark_poses]
-					# 	for a in world.agents
-					# ]
-					# )
-					# # self.delta_dists = self._bipartite_min_dists(self.dists)
-					# # print("delta_dists",self.delta_dists)
-					# _, goals = linear_sum_assignment(self.dists)
-					# # print("ri",agents,"ci",goals)
-					# goal_pos = self.landmark_poses[goals[agent.id]]
-					# goal_occupied = np.array([self.landmark_poses_occupied[goals[agent.id]]])
-
-					## use closest goal
-
-					## determine which goal from self.landmark_poses is this chosen unocccupied goal
-					## use the index of the unoccupied goal to get the goal from self.landmark_poses
 					min_dist_goal = np.argmin(np.linalg.norm(entity.state.p_pos - unoccupied_goals, axis=1))
 					goal_pos = unoccupied_goals[min_dist_goal]
-					## check if the goal is occupied
 					goal_occupied = np.array([self.landmark_poses_occupied[unoccupied_goals_indices[min_dist_goal]]])
 					goal_history = self.goal_history[unoccupied_goals_indices[min_dist_goal]]
-					# print("graph goal_pos",goal_pos, "goal_occupied",goal_occupied)
-
 				else:
 					# Handle the case when all goals are occupied.
 					goal_pos = entity.state.p_pos
 					self.landmark_poses_occupied = np.zeros(self.num_agents)
 					goal_occupied = np.array([self.landmark_poses_occupied[entity.id]])
 					goal_history = self.goal_history[entity.id]
-					
-					# print("else",goal_pos, goal_occupied)
 			goal_history = np.array([goal_history])
-
 			rel_goal_pos = goal_pos - agent_pos
 			entity_type = entity_mapping['agent']
 		elif 'landmark' in name:
 			rel_goal_pos = rel_pos
 			goal_occupied = np.array([1])
 			goal_history = entity.id if entity.id != None else 0
-
-			# rel_goal_pos = np.repeat(rel_pos, self.num_landmarks)
 			entity_type = entity_mapping['landmark']
 		elif 'obstacle' in name:
 			rel_goal_pos = rel_pos
 			goal_occupied = np.array([1])
 			goal_history = entity.id if entity.id != None else 0
-
-
-			# rel_goal_pos = np.repeat(rel_pos, self.num_landmarks)
 			entity_type = entity_mapping['obstacle']
 		elif 'wall' in entity.name:
 			rel_goal_pos = rel_pos
 			goal_occupied = np.array([1])
 			goal_history = entity.id if entity.id != None else 0
-			# rel_goal_pos = np.repeat(rel_pos, self.num_landmarks)
 			entity_type = entity_mapping['wall']
 			## get wall corner point's relative position
-			# print("wall", entity.name, entity.endpoints, entity.orient,entity.width, entity.axis_pos,entity.axis_pos+entity.width/2)
-			# print("agent", agent_pos)
 			wall_o_corner = np.array([entity.endpoints[0],entity.axis_pos+entity.width/2]) - agent_pos
 			wall_d_corner = np.array([entity.endpoints[1],entity.axis_pos-entity.width/2]) - agent_pos
-			# print(np.array([entity.endpoints[0],entity.axis_pos+entity.width/2]),"wall_o_corner", wall_o_corner,np.array([entity.endpoints[1],entity.axis_pos-entity.width/2]),"wall_d_corner", wall_d_corner)
-			return np.hstack([rel_vel, rel_pos, rel_goal_pos,goal_occupied,goal_history,wall_o_corner,wall_d_corner,entity_type])
-			# return np.hstack([rel_vel, rel_pos, rel_goal_pos, entity_type,wall_o_corner])#,wall_d_corner])
-
+			agent_type = getattr(entity, 'agent_type', -1)
+			landmark_type = getattr(entity, 'landmark_type', -1)
+			return np.hstack([rel_vel, rel_pos, rel_goal_pos,goal_occupied,goal_history,wall_o_corner,wall_d_corner,agent_type, landmark_type, entity_type])
 		else:
 			raise ValueError(f'{entity.name} not supported')
 
-		return np.hstack([rel_vel, rel_pos, rel_goal_pos,goal_occupied,goal_history,rel_pos,rel_pos,entity_type])
-		# return np.hstack([rel_vel, rel_pos, rel_goal_pos, entity_type,rel_pos])#,rel_pos])
+		agent_type = getattr(entity, 'agent_type', -1)
+		landmark_type = getattr(entity, 'landmark_type', -1)
+		return np.hstack([rel_vel, rel_pos, rel_goal_pos,goal_occupied,goal_history,rel_pos,rel_pos,agent_type, landmark_type, entity_type])
 
 
 

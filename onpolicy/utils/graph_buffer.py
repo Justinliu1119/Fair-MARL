@@ -45,6 +45,7 @@ class GraphReplayBuffer(object):
     def __init__(self, 
                 args:argparse.Namespace, 
                 num_agents:int,
+                num_landmarks:int,
                 obs_space:gym.Space, 
                 cent_obs_space:gym.Space, 
                 node_obs_space:gym.Space,
@@ -52,6 +53,7 @@ class GraphReplayBuffer(object):
                 share_agent_id_space:gym.Space,
                 adj_space:gym.Space,
                 act_space:gym.Space):
+        self.num_landmarks = num_landmarks
         self.episode_length = args.episode_length
         self.n_rollout_threads = args.n_rollout_threads
         self.hidden_size = args.hidden_size
@@ -100,8 +102,8 @@ class GraphReplayBuffer(object):
         self.adj = np.zeros((self.episode_length + 1,
                                     self.n_rollout_threads,
                                     num_agents,
-                                    *adj_shape),
-                                    dtype=np.float32)
+                                    *adj_shape),)
+     
         self.agent_id = np.zeros((self.episode_length + 1,
                                     self.n_rollout_threads,
                                     num_agents,
@@ -181,7 +183,8 @@ class GraphReplayBuffer(object):
             masks:arr, 
             bad_masks:arr=None, 
             active_masks:arr=None, 
-            available_actions:arr=None) -> None:
+            available_actions:arr=None,
+            preference:arr=None) -> None:
         """
             Insert data into the buffer.
             share_obs: (argparse.Namespace) 
@@ -247,6 +250,8 @@ class GraphReplayBuffer(object):
             # print(self.step,"buffer active_masks.: ", self.active_masks.T)
         if available_actions is not None:
             self.available_actions[self.step + 1] = available_actions.copy()
+        if preference is not None:
+            self.preference[self.step + 1] = preference.copy()
 
         self.step = (self.step + 1) % self.episode_length
 

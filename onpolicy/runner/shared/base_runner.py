@@ -115,8 +115,10 @@ class Runner(object):
 		
 		# buffer
 		if self.all_args.env_name == "GraphMPE":
+			self.num_landmarks = self.all_args.num_landmarks
 			self.buffer = GraphReplayBuffer(self.all_args, 
 											self.num_agents,
+											self.num_landmarks,
 											self.envs.observation_space[0],
 											share_observation_space,
 											self.envs.node_observation_space[0],

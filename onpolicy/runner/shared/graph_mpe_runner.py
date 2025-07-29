@@ -803,10 +803,10 @@ class GMPERunner(Runner):
 			total_dists_traveled[-1],
 			total_time_taken[-1],
 			]
-			with open('/Users/jasmine/Jasmine/MIT/MARL/Codes/Team-Fair-MARL/'+str(self.all_args.model_name)+'_firstgoaldone_nogoal_fair_vs_success_new.csv', 'a', newline="") as f1:
-				# create the csv writer
-				writer = csv.writer(f1)
-				writer.writerow(csv_data1)
+			# with open('/Users/jasmine/Jasmine/MIT/MARL/Codes/Team-Fair-MARL/'+str(self.all_args.model_name)+'_firstgoaldone_nogoal_fair_vs_success_new.csv', 'a', newline="") as f1:
+			# 	# create the csv writer
+			# 	writer = csv.writer(f1)
+			# 	writer.writerow(csv_data1)
 		# Calculate the statistics for the box whisker plot
 		fair_minimum = np.min(fairness_param)
 		fair_0_1_quantile = np.percentile(fairness_param, 10)
@@ -1028,12 +1028,12 @@ class GMPERunner(Runner):
 
 		# csv_2 = [fairness_param]
 		# open the file in the write mode
-		with open('/Users/jasmine/Jasmine/MIT/MARL/Codes/Team-Fair-MARL/'+str(self.all_args.model_name)+'_firstgoaldone_nogoal_results_collect_new.csv', 'a', newline="") as f:
-			# create the csv writer
-			writer = csv.writer(f)
+		# with open('/Users/jasmine/Jasmine/MIT/MARL/Codes/Team-Fair-MARL/'+str(self.all_args.model_name)+'_firstgoaldone_nogoal_results_collect_new.csv', 'a', newline="") as f:
+		# 	# create the csv writer
+		# 	writer = csv.writer(f)
 
-			# write a row to the csv file
-			writer.writerow(csv_data)
+		# 	# write a row to the csv file
+		# 	writer.writerow(csv_data)
 
 		# # open the file in the write mode
 		# with open('/Users/jasmine/Jasmine/MIT/MARL/Codes/Team-Fair-MARL/fairness_plot.csv', 'a', newline="") as f:

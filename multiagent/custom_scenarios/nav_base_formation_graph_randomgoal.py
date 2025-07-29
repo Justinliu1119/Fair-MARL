@@ -71,6 +71,8 @@ class Scenario(BaseScenario):
 		# pull params from args
 		self.world_size = args.world_size
 		self.num_agents = args.num_agents
+		self.num_agent_types = args.num_agent_types
+		self.num_goal_types = args.num_goal_types
 		self.num_scripted_agents = args.num_scripted_agents
 		self.num_obstacles = args.num_obstacles
 		self.collaborative = args.collaborative
@@ -126,6 +128,7 @@ class Scenario(BaseScenario):
 		world.scripted_agents = [Agent() for _ in range(self.num_scripted_agents)]
 		for i, agent in enumerate(world.agents + world.scripted_agents):
 			agent.id = i
+			agent.agent_type = i % self.num_agent_types
 			agent.name = f'agent {i}'
 			agent.collide = True
 			agent.silent = True
@@ -140,6 +143,7 @@ class Scenario(BaseScenario):
 		world.scripted_agents_goals = [Landmark() for i in range(num_scripted_agents_goals)]
 		for i, landmark in enumerate(world.landmarks):
 			landmark.id = i
+			landmark.goal_type = i % self.num_goal_types
 			landmark.name = f'landmark {i}'
 			landmark.collide = False
 			landmark.movable = False
@@ -933,6 +937,14 @@ class Scenario(BaseScenario):
 		rel_second_closest_goal = second_closest_goal - agent.state.p_pos
 		# print("rel_second_closest_goal",rel_second_closest_goal,"second_closest_goal",second_closest_goal)
 		goal_history = np.array([goal_history])
+
+		# Add agent_type, goal_type, entity_type
+		agent_type = agent.agent_type if hasattr(agent, 'agent_type') else -1
+		goal_entity = world.get_entity('landmark', self.goal_match_index[agent.id])
+		goal_type = goal_entity.goal_type if hasattr(goal_entity, 'goal_type') else -1
+		entity_type = entity_mapping['agent']  # Self-observation always refers to agent
+		entity_info = np.array([agent_type, goal_type, entity_type])
+
 		# goal_pos = list(goal_pos)
 		# print("agent", agent.id,"goal_pos",agents_goal, "goal_occupied",np.round(goal_occupied,4), "min_dist",min_dist)
 		# pvel_array = np.array(agent.state.p_vel)
@@ -942,7 +954,7 @@ class Scenario(BaseScenario):
 		# goal_pos = [agents_goal - agent.state.p_pos]
 		# print("OBS val",np.concatenate((agent.state.p_vel, agent.state.p_pos, goal_pos,goal_occupied,goal_history) ))
 		# print("p_vel",agent.state.p_vel, "p_pos",agent.state.p_pos, "goal_pos",goal_pos, "goal_occupied",goal_occupied, "goal_history",goal_history, "rel_second_closest_goal",rel_second_closest_goal, "second_closest_goal_occupied",second_closest_goal_occupied)
-		return np.concatenate((agent.state.p_vel, agent.state.p_pos, goal_pos,goal_occupied,goal_history, rel_second_closest_goal,second_closest_goal_occupied) )# + goal_occupied+ goal_history)
+		return np.concatenate((agent.state.p_vel, agent.state.p_pos, goal_pos, goal_occupied, goal_history, rel_second_closest_goal, second_closest_goal_occupied, entity_info))
 
 		# if world.dists_to_goal[agent.id] == -1:
 		# 	mean_dist,  std_dev_dist, _ = self.collect_dist(world)
@@ -1125,7 +1137,7 @@ class Scenario(BaseScenario):
 	
 	def _get_entity_feat_global(self, entity:Entity, world:World) -> arr:
 		"""
-			Returns: ([velocity, position, goal_pos, entity_type])
+			Returns: ([velocity, position, goal_pos, agent_type, goal_type, entity_type])
 			in global coords for the given entity
 		"""
 		pos = entity.state.p_pos
@@ -1141,8 +1153,9 @@ class Scenario(BaseScenario):
 			entity_type = entity_mapping['obstacle']
 		else:
 			raise ValueError(f'{entity.name} not supported')
-
-		return np.hstack([vel, pos, goal_pos, entity_type])
+		agent_type = getattr(entity, 'agent_type', -1)
+		goal_type = getattr(entity, 'goal_type', -1)
+		return np.hstack([vel, pos, goal_pos, entity_type, agent_type, goal_type])
 
 	def _get_entity_feat_relative(self, agent:Agent, entity:Entity, world:World, fairness_param: np.ndarray) -> arr:
 		"""
@@ -1156,6 +1169,9 @@ class Scenario(BaseScenario):
 		rel_pos = entity_pos - agent_pos
 		rel_vel = entity_vel - agent_vel
 		# print("entity", entity.name, "rel_pos", rel_pos, "rel_vel", rel_vel)
+		entity_type = entity_mapping['agent']
+		agent_type = getattr(entity, 'agent_type', -1)
+		goal_type = getattr(entity, 'goal_type', -1)
 		if 'agent' in entity.name:
 			world.dists = np.array([np.linalg.norm(entity.state.p_pos - l) for l in self.landmark_poses])
 			min_dist = np.min(world.dists)
@@ -1228,6 +1244,7 @@ class Scenario(BaseScenario):
 
 			rel_goal_pos = goal_pos - agent_pos
 			entity_type = entity_mapping['agent']
+			return np.hstack([rel_vel, rel_pos, rel_goal_pos,goal_occupied,goal_history,rel_pos,rel_pos,agent_type,goal_type,entity_type])
 		elif 'landmark' in entity.name:
 			rel_goal_pos = rel_pos
 			goal_occupied = np.array([1])
@@ -1235,6 +1252,9 @@ class Scenario(BaseScenario):
 
 			# rel_goal_pos = np.repeat(rel_pos, self.num_landmarks)
 			entity_type = entity_mapping['landmark']
+			agent_type = getattr(entity, 'agent_type', -1)
+			goal_type = getattr(entity, 'goal_type', -1)
+			return np.hstack([rel_vel, rel_pos, rel_goal_pos,goal_occupied,goal_history,rel_pos,rel_pos,agent_type,goal_type,entity_type])
 		elif 'obstacle' in entity.name:
 			rel_goal_pos = rel_pos
 			goal_occupied = np.array([1])
@@ -1244,6 +1264,9 @@ class Scenario(BaseScenario):
 			# rel_goal_pos = np.repeat(rel_pos, self.num_landmarks)
 
 			entity_type = entity_mapping['obstacle']
+			agent_type = getattr(entity, 'agent_type', -1)
+			goal_type = getattr(entity, 'goal_type', -1)
+			return np.hstack([rel_vel, rel_pos, rel_goal_pos,goal_occupied,goal_history,rel_pos,rel_pos,agent_type,goal_type,entity_type])
 		elif 'wall' in entity.name:
 			rel_goal_pos = rel_pos
 			goal_occupied = np.array([1])
@@ -1251,20 +1274,19 @@ class Scenario(BaseScenario):
 			# rel_goal_pos = np.repeat(rel_pos, self.num_landmarks)
 
 			entity_type = entity_mapping['wall']
+			agent_type = getattr(entity, 'agent_type', -1)
+			goal_type = getattr(entity, 'goal_type', -1)
 			## get wall corner point's relative position
 			# print("wall", entity.name, entity.endpoints, entity.orient,entity.width, entity.axis_pos,entity.axis_pos+entity.width/2)
 			# print("agent", agent_pos)
 			wall_o_corner = np.array([entity.endpoints[0],entity.axis_pos+entity.width/2]) - agent_pos
 			wall_d_corner = np.array([entity.endpoints[1],entity.axis_pos-entity.width/2]) - agent_pos
 			# print(np.array([entity.endpoints[0],entity.axis_pos+entity.width/2]),"wall_o_corner", wall_o_corner,np.array([entity.endpoints[1],entity.axis_pos-entity.width/2]),"wall_d_corner", wall_d_corner)
-			return np.hstack([rel_vel, rel_pos, rel_goal_pos,goal_occupied,goal_history,wall_o_corner,wall_d_corner,entity_type])
+			return np.hstack([rel_vel, rel_pos, rel_goal_pos,goal_occupied,goal_history,wall_o_corner,wall_d_corner,agent_type,goal_type,entity_type])
 			# return np.hstack([rel_vel, rel_pos, rel_goal_pos, entity_type,wall_o_corner])#,wall_d_corner])
 
 		else:
 			raise ValueError(f'{entity.name} not supported')
-		# print("rel_pos",rel_pos, "rel_vel", rel_vel, "rel_goal_pos", rel_goal_pos, "goal_occupied", goal_occupied)
-		return np.hstack([rel_vel, rel_pos, rel_goal_pos,goal_occupied,goal_history,rel_pos,rel_pos,entity_type])
-		# return np.hstack([rel_vel, rel_pos, rel_goal_pos, entity_type,rel_pos])#,rel_pos])
 
 
 
