@@ -110,8 +110,8 @@ class Scenario(BaseScenario):
 		world = World()
 		# ------------------- Preference matrix for 2 types -------------------
 		# Define preferences: each goal type's preference vector
-		preference_matrix = np.array([[2, 1], 
-										[1, 3]])
+		preference_matrix = np.array([[3, 1], 
+										[1, 2]])
 		world.preference_matrix = preference_matrix
 		# -------------------------------------------------------------------------------
 		# graph related attributes
@@ -454,6 +454,8 @@ class Scenario(BaseScenario):
 			[3.0, 1.0],
 			[1.0, 2.0]
 		])
+
+		
 		agent_type_list = [agent.agent_type for agent in world.agents]
 		goal_type_list = [goal.landmark_type for goal in world.landmarks]
 		dist_matrix = np.linalg.norm(
@@ -801,6 +803,12 @@ class Scenario(BaseScenario):
 		second_closest_goal = self.landmark_poses[top_two_indices[1]]
 		# get goal occupied flag for that goal
 		second_closest_goal_occupied = np.array([self.landmark_poses_occupied[top_two_indices[1]]])
+		# Add goal type and preference info for top two goals
+		goal_type_1 = np.array([world.landmarks[top_two_indices[0]].landmark_type])
+		pref_1 = np.array([world.preference_matrix[agent.agent_type][goal_type_1[0]]])
+
+		goal_type_2 = np.array([world.landmarks[top_two_indices[1]].landmark_type])
+		pref_2 = np.array([world.preference_matrix[agent.agent_type][goal_type_2[0]]])
 
 		if min_dist < self.min_obs_dist:
 			# If the minimum distance is already less than self.min_dist_thresh, use the previous goal.
@@ -932,7 +940,12 @@ class Scenario(BaseScenario):
 		# Add agent_type information
 		agent_type = np.array([agent.agent_type])
 		preference_scalar = np.array([world.preference_matrix[agent.agent_type][landmark_type[0]]])
-		obs_vec = np.concatenate((agent.state.p_vel, agent.state.p_pos, goal_pos, goal_occupied, goal_history, rel_second_closest_goal, second_closest_goal_occupied, landmark_type, agent_type, preference_scalar))
+		obs_vec = np.concatenate((
+			agent.state.p_vel, agent.state.p_pos,
+			goal_pos, goal_occupied, goal_type_1, pref_1,
+			rel_second_closest_goal, second_closest_goal_occupied, goal_type_2, pref_2,
+			agent_type, landmark_type, preference_scalar
+		))
 		# print(f"Observation for agent {agent.name}:", obs_vec)
 		return obs_vec
 

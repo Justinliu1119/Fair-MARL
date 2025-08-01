@@ -100,10 +100,11 @@ def solve_eg_assignment(preference, cost, agent_types, goal_types, budgets=None,
         x: assignment matrix (n_agents x n_goals), binary
         utilities: array of each agent's achieved utility
     '''
+    preference = preference.T # Transpose to match (goal_types x agent_types) shape
     utility = np.zeros((n_agents, n_goals))
     for i in range(n_agents):
         for j in range(n_goals):
-            utility[i, j] = preference[agent_types[i], goal_types[j]] - distance_weight * cost[i, j]
+            utility[i, j] = preference[goal_types[j], agent_types[i]] - distance_weight * cost[i, j]
 
     if budgets is None:
         budgets = np.ones(n_agents)
