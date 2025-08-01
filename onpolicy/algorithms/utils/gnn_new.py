@@ -128,7 +128,7 @@ class EmbedConv(MessagePassing):
 		"""
 		node_feat_j = x_j[:,:-1]
 		# print("inside gnn", x_j.shape)
-		# dont forget to convert to torch.LongTensor
+		# Convert to torch.LongTensor
 		entity_type_j = x_j[:,-1].long()
 		# print("entity_type_j", entity_type_j.shape,entity_type_j)
 		entity_embed_j = self.entity_embed(entity_type_j)

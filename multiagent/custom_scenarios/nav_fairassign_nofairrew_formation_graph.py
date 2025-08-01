@@ -156,7 +156,7 @@ class Scenario(BaseScenario):
 		# Assign goal_type and preference vectors to each landmark (goal)
 		for i, landmark in enumerate(world.landmarks):
 			landmark.landmark_type = i % self.num_landmark_types
-			landmark.preference_vector = preference_matrix[landmark.landmark_type]
+			landmark.preference = preference_matrix[:, landmark.landmark_type]
 		# Inserted loop to assign goal_type after all landmarks have been added
 		num_targets_per_type = args.num_targets_per_type
 		for i, landmark in enumerate(world.landmarks):
@@ -178,6 +178,9 @@ class Scenario(BaseScenario):
 			obstacle.movable = False
 			obstacle.global_id = global_id
 			global_id += 1
+			# Ensure obstacles have default type attributes
+			obstacle.agent_type = -1
+			obstacle.landmark_type = -1
 		## add wall
 		# num obstacles per wall is twice the length of the wall
 		wall_length = np.random.uniform(0.2, 0.4)
@@ -194,6 +197,9 @@ class Scenario(BaseScenario):
 			wall.movable = False
 			wall.global_id = global_id
 			global_id += 1
+			# Ensure walls have default type attributes
+			wall.agent_type = -1
+			wall.landmark_type = -1
 		# num_walls = 1
 
 		# # add wall obstacles
@@ -444,7 +450,10 @@ class Scenario(BaseScenario):
 		# reset
 		########### set fair goals for each agent ###########
 		# Define variables for assignment
-		preference_matrix = np.array([[3.0, 1.0], [1.0, 2.0]])
+		preference_matrix = np.array([
+			[3.0, 1.0],
+			[1.0, 2.0]
+		])
 		agent_type_list = [agent.agent_type for agent in world.agents]
 		goal_type_list = [goal.landmark_type for goal in world.landmarks]
 		dist_matrix = np.linalg.norm(
@@ -922,11 +931,10 @@ class Scenario(BaseScenario):
 		landmark_type = np.array([world.landmarks[matched_goal_index].landmark_type])
 		# Add agent_type information
 		agent_type = np.array([agent.agent_type])
-		# print("FLAGS",self.landmark_poses_occupied)
-		# first_index = np.where((self.landmark_poses == agents_goal).all(axis=1))[0]
-		# second_index = np.where((self.landmark_poses == second_closest_goal).all(axis=1))[0]
-		# print("agent", agent.id,"goal_pos",first_index,"second_closest_goal",second_index,"goal_occupied",np.round(goal_occupied,4), "min_dist",min_dist, "second_closest_goal_occupied",np.round(second_closest_goal_occupied,4))
-		return np.concatenate((agent.state.p_vel, agent.state.p_pos, goal_pos, goal_occupied, goal_history, rel_second_closest_goal, second_closest_goal_occupied, landmark_type, agent_type))
+		preference_scalar = np.array([world.preference_matrix[agent.agent_type][landmark_type[0]]])
+		obs_vec = np.concatenate((agent.state.p_vel, agent.state.p_pos, goal_pos, goal_occupied, goal_history, rel_second_closest_goal, second_closest_goal_occupied, landmark_type, agent_type, preference_scalar))
+		# print(f"Observation for agent {agent.name}:", obs_vec)
+		return obs_vec
 
 
 		# if world.dists_to_goal[agent.id] == -1:
@@ -1079,34 +1087,28 @@ class Scenario(BaseScenario):
 				node_obs.append(node_obs_i)
 		elif world.graph_feat_type == 'relative':
 			for i, entity in enumerate(world.entities):
-				# print("i", i, self.reward(agent, world))
-				# if agent.name == entity.name:
-				# 	# print("found an agent")
-				# 	# message_reward = self.modify_reward(agent_rewards[agent_names.index(agent.name)] )
-				# 	message_reward = 0.0 # setting to zero to avoid computations
-				# 	fairness_param = 0.0 # mean_dist/(std_dev_dist+0.0001)
-				# 	# print("fairness_param",fairness_param)		
-				# else:
-				# 	# print("no agent")
-				# 	message_reward = 0.0
-				# 	fairness_param =0.0
 				node_obs_i = self._get_entity_feat_relative(agent, entity, world, fairness_param)
-				# node_obs_i = np.insert(node_obs_i, -1, message_reward)
-				# node_obs_i = np.insert(node_obs_i, -1, fairness_param)
-				# message_reward = np.reshape(message_reward, (1,))
-				# print("node_obs_i",node_obs_i.shape,message_reward)
-				# node_obs_i = np.concatenate((node_obs_i, message_reward), axis=0)
-				# print("node_obs_i",node_obs_i.shape)
+				print(f"[{agent.name}] Relative feature relative to {entity.name}: {node_obs_i}")
 				node_obs.append(node_obs_i)
 
 		node_obs = np.array(node_obs)
 		adj = world.cached_dist_mag
 
-		# Compute agent-specific preference vector for landmarks
-		agent_type = agent.agent_type
-		preference_vector = world.preference_matrix[agent_type]
-		landmark_types = [l.landmark_type for l in world.landmarks]
-		pref_per_landmark = np.array([preference_vector[t] for t in landmark_types])
+		# Override agent-to-goal edges with utility = preference - distance
+		agent_indices = [i for i, ent in enumerate(world.entities) if 'agent' in ent.name]
+		goal_indices = [j for j, ent in enumerate(world.entities) if 'landmark' in ent.name]
+		preference_matrix = world.preference_matrix
+		lambda_weight = 1.0  # tunable parameter
+
+		for i in agent_indices:
+			agent_entity = world.entities[i]
+			agent_type = agent_entity.agent_type
+			for j in goal_indices:
+				goal_entity = world.entities[j]
+				goal_type = goal_entity.landmark_type
+				distance = adj[i, j]
+				preference = preference_matrix[agent_type][goal_type]
+				adj[i, j] = preference - lambda_weight * distance
 
 		return node_obs, adj
 
@@ -1114,13 +1116,16 @@ class Scenario(BaseScenario):
 		"""
 			Construct a graph from the cached distances.
 			Nodes are entities in the environment
-			Edges are constructed by thresholding distances
+			Edges are constructed as a fully connected graph (except self-loops)
 		"""
 		dists = world.cached_dist_mag
-		# just connect the ones which are within connection 
-		# distance and do not connect to itself
-		connect = np.array((dists <= self.max_edge_dist) * \
-							(dists > 0)).astype(int)
+		# Fully connect all entities except self-loops (centralized communication)
+		num_entities = dists.shape[0]
+		connect = np.zeros_like(dists, dtype=int)
+		for i in range(num_entities):
+			for j in range(num_entities):
+				if i != j:
+					connect[i, j] = 1  # fully connect all entities (agents, landmarks, etc.)
 		sparse_connect = sparse.csr_matrix(connect)
 		sparse_connect = sparse_connect.tocoo()
 		row, col = sparse_connect.row, sparse_connect.col
@@ -1169,6 +1174,9 @@ class Scenario(BaseScenario):
 		# Special handling for entities whose names start with "agent"
 		name = entity.name.lower()
 
+		# Default placeholder for preference (for non-landmarks, updated below)
+		preference = np.array([0.0])
+
 		if 'agent' in name:
 			world.dists = np.array([np.linalg.norm(entity.state.p_pos - l) for l in self.landmark_poses])
 			min_dist = np.min(world.dists)
@@ -1195,16 +1203,22 @@ class Scenario(BaseScenario):
 			goal_history = np.array([goal_history])
 			rel_goal_pos = goal_pos - agent_pos
 			entity_type = entity_mapping['agent']
+			# For non-goals, preference is placeholder (already set above)
 		elif 'landmark' in name:
 			rel_goal_pos = rel_pos
 			goal_occupied = np.array([1])
 			goal_history = entity.id if entity.id != None else 0
 			entity_type = entity_mapping['landmark']
+			# Extract preference value for this agent-goal pair from the world preference matrix
+			agent_type = agent.agent_type
+			goal_type = entity.landmark_type
+			preference = np.array([world.preference_matrix[agent_type][goal_type]])
 		elif 'obstacle' in name:
 			rel_goal_pos = rel_pos
 			goal_occupied = np.array([1])
 			goal_history = entity.id if entity.id != None else 0
 			entity_type = entity_mapping['obstacle']
+			preference = np.array([0.0]) # For non-goals, preference is placeholder (already set above)
 		elif 'wall' in entity.name:
 			rel_goal_pos = rel_pos
 			goal_occupied = np.array([1])
@@ -1215,13 +1229,14 @@ class Scenario(BaseScenario):
 			wall_d_corner = np.array([entity.endpoints[1],entity.axis_pos-entity.width/2]) - agent_pos
 			agent_type = getattr(entity, 'agent_type', -1)
 			landmark_type = getattr(entity, 'landmark_type', -1)
+			preference = np.array([0.0])  # placeholder for non-goals
 			return np.hstack([rel_vel, rel_pos, rel_goal_pos,goal_occupied,goal_history,wall_o_corner,wall_d_corner,agent_type, landmark_type, entity_type])
 		else:
 			raise ValueError(f'{entity.name} not supported')
 
 		agent_type = getattr(entity, 'agent_type', -1)
 		landmark_type = getattr(entity, 'landmark_type', -1)
-		return np.hstack([rel_vel, rel_pos, rel_goal_pos,goal_occupied,goal_history,rel_pos,rel_pos,agent_type, landmark_type, entity_type])
+		return np.hstack([rel_vel, rel_pos, rel_goal_pos, goal_occupied, goal_history, rel_pos, rel_pos, landmark_type, entity_type, preference])
 
 
 
