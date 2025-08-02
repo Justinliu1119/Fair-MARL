@@ -104,6 +104,8 @@ class Agent(Entity):
         super(Agent, self).__init__()
         # agent type
         self.type = None 
+        # agent lambda
+        self.lambda_vector = None
         # agent are adversary
         self.adversary = False
         # agent are dummy

@@ -148,6 +148,10 @@ class Scenario(BaseScenario):
 			agent.max_speed = self.max_speed
 			# Assign agent_type
 			agent.agent_type = i % self.num_agent_types
+		# Assign unique lambda to each agent
+		for i, agent in enumerate(world.agents + world.scripted_agents):
+			agent.lambda_vector = np.zeros(self.num_agents)
+			agent.lambda_vector[i] = 1.0  # Each agent gets a unique one-hot lambda
 		# add landmarks (goals)
 		world.landmarks = [Landmark() for i in range(self.num_landmarks)]
 		for i, landmark in enumerate(world.landmarks):
@@ -463,7 +467,7 @@ class Scenario(BaseScenario):
 			np.array([goal.state.p_pos for goal in world.landmarks])[None, :, :],
 			axis=2
 		)
-		x = solve_eg_assignment(
+		x, lambda_t = solve_eg_assignment(
 			preference=preference_matrix,
 			cost=dist_matrix,
 			agent_types=agent_type_list,

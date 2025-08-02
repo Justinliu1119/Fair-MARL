@@ -99,32 +99,37 @@ def solve_eg_assignment(preference, cost, agent_types, goal_types, budgets=None,
     Returns:
         x: assignment matrix (n_agents x n_goals), binary
         utilities: array of each agent's achieved utility
+
+        
     '''
-    preference = preference.T # Transpose to match (goal_types x agent_types) shape
+
+    preference = preference.T
     utility = np.zeros((n_agents, n_goals))
-    for i in range(n_agents):
-        for j in range(n_goals):
-            utility[i, j] = preference[goal_types[j], agent_types[i]] - distance_weight * cost[i, j]
+    for j in range(n_goals):
+        for i in range(n_agents):
+            utility[j, i] = preference[goal_types[j], agent_types[i]] - distance_weight * cost[i, j]
 
     if budgets is None:
         budgets = np.ones(n_agents)
 
     x = cp.Variable((n_goals, n_agents), nonneg=True)  # match original shape (m x n)
 
+    penalty = cp.sum_squares(cp.sum(x, axis=0) - 1)  # Encourage each agent to be fully used by exactly one buyer
+
     objective = cp.Maximize(
         cp.sum([
             budgets[goal_types[j]] * cp.log(cp.sum(cp.multiply(utility[j], x[j])) + 1e-6)
             for j in range(n_goals)
-        ])
+        ])-0.8*penalty
     )
 
-    constraints = [
-        cp.sum(x[:, t]) <= 1  # agent t has limited total assignment
-        for t in range(n_agents)
-    ]
-
+    constraints = [cp.sum(x[:, t]) <= 1 for t in range(n_agents)]
     prob = cp.Problem(objective, constraints)
-    prob.solve()
+    result = prob.solve()
+
+    if result is None or prob.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
+        print(f"Social problem solver failed. Status: {prob.status}")
+        return
 
     if x.value is None:
         raise RuntimeError("❌ CVXPY solver failed. x.value is None.")
@@ -144,7 +149,11 @@ def solve_eg_assignment(preference, cost, agent_types, goal_types, budgets=None,
     x_onehot[np.arange(n_agents), np.argmax(x_val, axis=1)] = 1
     print("one_hot shape:", x_onehot)
 
-    return x_onehot
+    lambda_t = np.array([constraints[t].dual_value for t in range(n_agents)])
+    print("Dual variable values (prices):", lambda_t)
+    x_onehot = x_onehot.T  # Transpose to match (n_goals, n_agents) shape
+
+    return x_onehot, lambda_t
 
 if __name__=='__main__':
     # n = 10
