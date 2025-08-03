@@ -590,6 +590,7 @@ class GMPERunner(Runner):
 				if True, just return the metrics of the env and don't render.
 		"""
 		envs = self.envs
+		print("RENDER FUNCTION CALLED")
 		self.reset_number = 0
 		all_frames = []
 		total_dists_traveled, total_time_taken = [], []
@@ -617,6 +618,7 @@ class GMPERunner(Runner):
 					image = envs.render('rgb_array')[0][0]
 					all_frames.append(image)
 				else:
+					print("Calling envs.render('human')")
 					envs.render('human')
 
 			rnn_states = np.zeros((self.n_rollout_threads, 
@@ -713,6 +715,7 @@ class GMPERunner(Runner):
 						if elapsed < self.all_args.ifi:
 							time.sleep(self.all_args.ifi - elapsed)
 					else:
+						print("Calling envs.render('human')")
 						envs.render('human')
 
 

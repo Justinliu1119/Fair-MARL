@@ -107,10 +107,13 @@ def solve_eg_assignment(preference, cost, agent_types, goal_types, budgets=None,
     utility = np.zeros((n_agents, n_goals))
     for j in range(n_goals):
         for i in range(n_agents):
-            utility[j, i] = preference[goal_types[j], agent_types[i]] - distance_weight * cost[i, j]
-
-    if budgets is None:
-        budgets = np.ones(n_agents)
+            pref = preference[goal_types[j], agent_types[i]]
+            if pref == 0:
+                utility[j, i] = 0
+            else:
+                utility[j, i] = pref - distance_weight * cost[i, j]
+        if budgets is None:
+            budgets = np.ones(n_agents)
 
     x = cp.Variable((n_goals, n_agents), nonneg=True)  # match original shape (m x n)
 

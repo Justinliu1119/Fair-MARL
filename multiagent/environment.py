@@ -488,15 +488,37 @@ class MultiAgentBaseEnv(gym.Env):
 							self.comm_geoms[e][ci].set_color(
 								color, color, color)
 
-			# add agent and goal labels
+			# Render agent sensing range circles for debugging with a bold red circle
+			from multiagent import rendering
+			for entity in self.world.entities:
+				if isinstance(entity, Agent):
+					sensing_radius = getattr(self.world, 'min_obs_dist', 0.5)
+					print(f"Drawing sensing circle for {entity.name} at {entity.state.p_pos}, radius={sensing_radius}")
+					sense_circle = rendering.make_circle(radius=sensing_radius, filled=False)
+					sense_circle.set_linewidth(5.0)
+					sense_circle.set_color(1.0, 0.0, 0.0, alpha=1.0)  # bold red
+					transform = rendering.Transform()
+					transform.set_translation(*entity.state.p_pos)
+					sense_circle.add_attr(transform)
+					self.viewers[i].add_onetime(sense_circle)
+
+			# add agent and goal labels (with agent type support)
 			for entity in self.world.entities:
 				pos = entity.state.p_pos
-				if 'agent' in entity.name:
-					label = f"{entity.name}"
-					self.viewers[i].draw_text(label, x=pos[0] + 0.05, y=pos[1] + 0.05, font_size=10, color=(0, 0, 0, 1))
+				if isinstance(entity, Agent):
+					agent_type = getattr(entity, 'agent_type', None)
+					if agent_type is not None:
+						label = f"{entity.name} ({agent_type})"
+					else:
+						label = f"{entity.name}"
+					print(f"Rendering label for agent: {label} at {pos}")
+					self.viewers[i].draw_text(label, x=pos[0] + 0.05, y=pos[1] + 0.05,
+											  font_size=10, color=(0.3, 0.3, 0.8, 1))
 				elif 'landmark' in entity.name or 'goal' in entity.name:
 					label = f"{entity.name}"
-					self.viewers[i].draw_text(label, x=pos[0] + 0.05, y=pos[1] + 0.05, font_size=10, color=(0.3, 0.3, 0.8, 1))
+					print(f"Rendering label for agent: {label} at {pos}")
+					self.viewers[i].draw_text(label, x=pos[0] + 0.05, y=pos[1] + 0.05,
+											  font_size=10, color=(0.3, 0.3, 0.8, 1))
 
 			# render the graph connections
 			if hasattr(self.world, 'graph_mode'):
