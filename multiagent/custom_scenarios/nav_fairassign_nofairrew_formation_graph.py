@@ -110,9 +110,12 @@ class Scenario(BaseScenario):
 		world = World()
 		# ------------------- Preference matrix for 2 types -------------------
 		# Define preferences: each goal type's preference vector
-		preference_matrix = np.array([[2, 0], 
-										[0, 2]])
+		preference_matrix = np.array([[3.0, 0.0], 
+										[0.0, 2.0]])
 		world.preference_matrix = preference_matrix
+		# Set budget: type 0 gets 2, type 1 gets 1
+		budget = [2, 1]  # Type 0 → 2, Type 1 → 1
+		world.budget = budget
 		# -------------------------------------------------------------------------------
 		# graph related attributes
 		world.cache_dists = True # cache distance between all entities
@@ -152,17 +155,6 @@ class Scenario(BaseScenario):
 		for i, agent in enumerate(world.agents + world.scripted_agents):
 			agent.lambda_vector = np.zeros(self.num_agents)
 			agent.lambda_vector[i] = 1.0  # Each agent gets a unique one-hot lambda
-
-		# Assign agent types dictionary (persistent for Scenario)
-		self.agent_types = {
-			agent.id: 0 if agent.id % 2 == 0 else 1
-			for agent in world.agents
-		}
-		# Define preference matrix: rows = agent types, columns = goal types
-		self.preference_matrix = np.array([
-			[2.0, 0],  # Agent type 0 prefers goal type 0 more than goal type 1
-			[0.0, 2.0]   # Agent type 1 prefers goal type 1 more than goal type 0
-		])
 		# add landmarks (goals)
 		world.landmarks = [Landmark() for i in range(self.num_landmarks)]
 		for i, landmark in enumerate(world.landmarks):
@@ -466,8 +458,8 @@ class Scenario(BaseScenario):
 		########### set fair goals for each agent ###########
 		# Define variables for assignment
 		preference_matrix = np.array([
-			[3.0, 1.0],
-			[1.0, 2.0]
+			[3.0, 0.0],
+			[0.0, 2.0]
 		])
 
 		
@@ -478,12 +470,15 @@ class Scenario(BaseScenario):
 			np.array([goal.state.p_pos for goal in world.landmarks])[None, :, :],
 			axis=2
 		)
+		# Use budget according to agent type
+		budget = [2, 1]  # Type 0 → 2, Type 1 → 1
+		budgets = [budget[agent_type] for agent_type in agent_type_list]
 		x, lambda_t = solve_eg_assignment(
 			preference=preference_matrix,
 			cost=dist_matrix,
 			agent_types=agent_type_list,
 			goal_types=goal_type_list,
-			budgets=[1.0] * len(world.agents),
+			budgets=budgets,
 			distance_weight=0.9,
 			verbose=False
 		)
@@ -808,84 +803,73 @@ class Scenario(BaseScenario):
 			Return:
 				[agent_vel, agent_pos, goal_pos, goal_occupied]
 		"""
-		
+		# print("Agent",agent.id)
+		# print(agent.state.p_pos)
 		world.dists = np.array([np.linalg.norm(agent.state.p_pos - l) for l in self.landmark_poses])
 		min_dist = np.min(world.dists)
 		sorted_indices = np.argsort(world.dists)  # Get indices that would sort the distances
-		
+		# print("Agent! sorted indices", sorted_indices)
 		top_two_indices = sorted_indices[:2]  # Get indices of top two closest distances
+		# GET the LOCATION of the SECOND closest goal
 		second_closest_goal = self.landmark_poses[top_two_indices[1]]
 		# get goal occupied flag for that goal
 		second_closest_goal_occupied = np.array([self.landmark_poses_occupied[top_two_indices[1]]])
-		# Add goal type and preference info for top two goals
-		goal_type_1 = np.array([world.landmarks[top_two_indices[0]].landmark_type])
-		pref_1 = np.array([world.preference_matrix[agent.agent_type][goal_type_1[0]]])
 
-		# ---------- Second Closest Goal ------------------#
+		# Goal type and preference info for top two goals
+		goal_type_1 = np.array([world.landmarks[top_two_indices[0]].landmark_type])
+
 		goal_type_2 = np.array([world.landmarks[top_two_indices[1]].landmark_type])
-		# Replace the goal_pref line with agent_type and full preference vector
-		agent_type = self.agent_types[agent.id]
-		goal_pref = self.preference_matrix[agent_type]
+		
+		# Add goal_pref_2 for the second closest goal
+		goal2_index = sorted_indices[1]
+		goal_pref_2 = np.array([world.preference_matrix[:, goal2_index]])
 
 		if min_dist < self.min_obs_dist:
-			
+			# If the minimum distance is already less than self.min_dist_thresh, use the previous goal.
+			# If the minimum distance is already less than self.min_obs_dist, use the previous goal.
 			chosen_goal = np.argmin(world.dists)
 			agents_goal = self.landmark_poses[chosen_goal]
 
 			## check if any agent have left goals to go to other goals
 			# check which agents among the world.dists are less than self.min_obs_dist
-			# ---------------Nearby goals are the ones WITHININ OBSERVATION RANGE------------
+			# find which goals are within self.min_obs_dist and unoccupied
 			nearby_goals = np.where(world.dists < self.min_obs_dist)[0]
-			
-			# check if any of those have been occupied and verify if true
+			# print("nearby_goals",nearby_goals)
+			# check if any of those have bee occupied and verify if true
 			for goal in nearby_goals:
-				# --------------------------- Check if any of the nearby goals are occupied --------------------------
+				# print("Agent",agent.id,"Nearby goal",goal,self.landmark_poses_occupied[goal])
 				if self.landmark_poses_occupied[goal] == 1.0:
-					# ----------------- Calculate the proximity of each agent in the environment to the goals WITHININ OBSERVATION RANGE --------------
+					# print("Agent",agent.id,"Nearby goal",goal, "is occupied")
 					goal_proximity = np.array([np.linalg.norm(self.landmark_poses[goal] - agent.state.p_pos)  for agent in world.agents])
-					# ----------------- Skip the all goals if other agents are already at -----------------------
 					if np.any(goal_proximity < self.min_dist_thresh):
-						
+						# print("Agent",agent.id,"Nearby goal",goal, "is occupied and another agent is at goal")
 						continue
-					# ----------------- If the goal is occupied but no agent is at the goal, then update the occupancy flag --------------------------
 					else:
 						# print("Agent",agent.id,"Nearby goal",goal, "is shown occupied but no agent is at goal")
 						self.landmark_poses_occupied[goal] = np.min(goal_proximity)
 
-			# Is there is unoccupied goal and the type matches the ego agent type the unoccupied goal is chosen( if it is in the sensing range)
-
-			# -------------If goal WITHIN OBSERVATION RANGE and within CLAIM DISTANCE, the EGO Agent can claim the goal(update the flag) ------------
 			if min_dist < self.min_dist_thresh:
 				self.landmark_poses_occupied[chosen_goal] = 1.0
 				self.goal_history[chosen_goal] = agent.id
-
-			
-			# ------------- If goal WITHIN OBSERVATION RANGE and NOT within CLAIM DISTANCE, the EGO AGENT can update the occupancy flag ------------
 			else:
-				# -------------------- Calculate the distance of every agent to the chosen goal -------------------
+				# goal_proximity is finding how many agents are nearthi chosen goal
 				goal_proximity = np.array([np.linalg.norm(agents_goal - agent.state.p_pos)  for agent in world.agents])
 				# print("Agent",agent.id,"chosen_goal", chosen_goal, "goal_proximity",goal_proximity, "flags",self.landmark_poses_occupied, "history",self.goal_history)
 				closest_dist_to_goal = np.min(goal_proximity)
-				
-				
-				# agent veered off the goal after setting the FLAG to TRUE
-				if self.landmark_poses_occupied[chosen_goal] == 1.0: # If the goal is not occupied but it's set to TRUE that means the history agent veered off
+				# agent veered off the goal
+				if self.landmark_poses_occupied[chosen_goal] == 1.0:
 
 					# if there are no agents on the goal, then the agent can take the goal and change the occupancy value
-
-					# If ANY agent is already AT the goal, it CLAIMS the goal
 					if np.any(goal_proximity < self.min_dist_thresh):
-						
+						# print("Agent!", "{:.0f}".format(self.goal_history[chosen_goal]), " is already at goal", "{:.0f}".format(chosen_goal), "min_dist", "{:.3f}".format(min_dist), "occupied flags",  self.landmark_poses_occupied, "history", self.goal_history)
 
 						######
 						## Add case when all nearby observed goals are occupied
-						# In this case the EGO AGENT will request for the CLOSEST and UNOCCUPIED goal information as it's chosen goal
-						# EGO AGENT can request the closest unoccupied goal REAGRDLESS OF SENESING RANGE
-						# NOTE THAT THIS GOAL MIGHT BE THE SAME AS THE SECOND CLOSEST GOAL
-
 						unoccupied_goals = self.landmark_poses[self.landmark_poses_occupied!= 1]
+						# print(agent.id,"Unoccupied",unoccupied_goals)
 						unoccupied_goals_indices = np.where(self.landmark_poses_occupied != 1)[0]
 						chosen_goal = np.argmin(np.linalg.norm(agent.state.p_pos - unoccupied_goals, axis=1))
+						# print("min_dist_goal",min_dist_goal,unoccupied_goals_indices[min_dist_goal])
 						agents_goal = unoccupied_goals[chosen_goal]
 						# second_index = np.where((self.landmark_poses == second_closest_goal).all(axis=1))[0]
 						# if top_two_indices[1] == chosen_goal:
@@ -894,9 +878,6 @@ class Scenario(BaseScenario):
 						# goal_occupied = np.array([self.landmark_poses_occupied[unoccupied_goals_indices[min_dist_goal]]])
 						# goal_history = self.goal_history[unoccupied_goals_indices[min_dist_goal]]
 						######
-
-
-					# ------------ No other agents are at the goal yet, so the CLOSEST AGENT can update the occupancy flag ------------
 					else:
 						# self.landmark_poses_occupied[chosen_goal] = 1.0 - min_dist
 						# print("FLag about to update",self.landmark_poses_occupied[chosen_goal])
@@ -904,71 +885,110 @@ class Scenario(BaseScenario):
 						# print("Flag updated",self.landmark_poses_occupied[chosen_goal])
 						# print("Agent!", "{:.0f}".format(self.goal_history[chosen_goal]), " veered off the goal", "{:.0f}".format(chosen_goal), "min_dist", "{:.3f}".format(min_dist), "occupied flags",  self.landmark_poses_occupied, "history", self.goal_history)
 
-				# ---------------- Use the Closest agent to that goal to update the occupancy FLAG -------------------
+				# another agent already at goal, can't overwrite the flag
 				elif self.landmark_poses_occupied[chosen_goal] != 1.0:
-					
+					# self.landmark_poses_occupied[chosen_goal] = 1.0 - min_dist
+					# print("ag! ", agent.id, "NEAR GOAL", chosen_goal, "dist", "{:.3f}".format(min_dist), "goal_occupied_flag", "{:.3f}".format(self.landmark_poses_occupied[chosen_goal]), "occupied flags", self.landmark_poses_occupied, "history", self.goal_history)
+					# print("FLag about to update",self.landmark_poses_occupied[chosen_goal])
 					self.landmark_poses_occupied[chosen_goal] = 1.0-closest_dist_to_goal
-				
+					# print("Flag updated",self.landmark_poses_occupied[chosen_goal])
 			# self.landmark_poses_occupied[chosen_goal] = 1
 			goal_occupied = np.array([self.landmark_poses_occupied[chosen_goal]])
 			goal_history = self.goal_history[chosen_goal]
 
-			# print("ob1 chosen_goal",chosen_goal, "agents_goal",agents_goal, "goal_occupied",goal_occupied)
+			# Add goal preference information (after goal_pos, goal_history, goal_occupied are set)
+			goal_pref_1 = np.array([world.preference_matrix[:, chosen_goal]])
 
-	# SECOND BIG CASE ---------------- If the CLOSEST GOAL is OUTSIDE OF EGO AEGNT"S OBSERVATION RANGE ----------------
+			# print("ob1 chosen_goal",chosen_goal, "agents_goal",agents_goal, "goal_occupied",goal_occupied)
 		else:
 			# create another variable to store which goals are uncoccupied using an index of 0, 1 or 2 based on self.landmark_poses
 
-			# UNOCCUPIED GOALS
 			unoccupied_goals = self.landmark_poses[self.landmark_poses_occupied!= 1]
-			
+			# print("Self.landmark_poses",self.landmark_poses)
+			# print("landmark_poses_occupied",self.landmark_poses_occupied)
+			# print("unoccupied_goals",unoccupied_goals)
 			unoccupied_goals_indices = np.where(self.landmark_poses_occupied != 1)[0]
 			# print("unoccupied_goals_indices",unoccupied_goals_indices)
-
-
-			# *** FINDING THE NEARBY UNOCCUPIED GOALS ***
-
 			if len(unoccupied_goals) > 0:
-				# -------------- choose the CLOSEST UNOCCUPIED GOAL as EGO AGENT"S GOAL --------------
-				min_dist_goal = np.argmin(np.linalg.norm(agent.state.p_pos - unoccupied_goals, axis=1))
+				# # if goals are unoccupied, match based on bipartite matching
+				# self.dists = np.array(
+				# [
+				# 	[np.linalg.norm(a.state.p_pos - pos) for pos in self.landmark_poses]
+				# 	for a in world.agents
+				# ]
+				# )
+				# # self.delta_dists = self._bipartite_min_dists(self.dists)
+				# # print("delta_dists",self.delta_dists)
+				# _, goals = linear_sum_assignment(self.dists)
+				# # print("ri",agents,"ci",goals)
+				# agents_goal = self.landmark_poses[goals[agent.id]]
 
-				## SET THE EGO AGENT"S GOAL TO THE CLOSEST UNOCCUPIED GOAL
+				## use closest goal
+				# print("unoccupied_goals",unoccupied_goals)
+				# print(np.argmin(np.linalg.norm(agent.state.p_pos - unoccupied_goals, axis=1)), unoccupied_goals[np.argmin(np.linalg.norm(agent.state.p_pos - unoccupied_goals, axis=1))])
+
+				## determine which goal from self.landmark_poses is this chosen unocccupied goal
+				## use the index of the unoccupied goal to get the goal from self.landmark_poses
+				min_dist_goal = np.argmin(np.linalg.norm(agent.state.p_pos - unoccupied_goals, axis=1))
+				# print("min_dist_goal",min_dist_goal,unoccupied_goals_indices[min_dist_goal])
 				agents_goal = unoccupied_goals[min_dist_goal]
 				## check if the goal is occupied
 				goal_occupied = np.array([self.landmark_poses_occupied[unoccupied_goals_indices[min_dist_goal]]])
 				goal_history = self.goal_history[unoccupied_goals_indices[min_dist_goal]]
 
-				
-			# Fall back for it All Goals in the environment are occupied
+				# Add goal preference information (after goal_pos, goal_history, goal_occupied are set)
+				goal_pref_1 = np.array([world.preference_matrix[:, unoccupied_goals_indices[min_dist_goal]]])
+
+				# print("ob2 goal_occupied",goal_occupied)
+				# print("agents_goal",agents_goal)
+
 			else:
 				# Handle the case when all goals are occupied.
 				agents_goal = agent.state.p_pos
 				self.landmark_poses_occupied = np.zeros(self.num_agents)
 				goal_history = self.goal_history[agent.id]
-
 				goal_occupied = np.array([self.landmark_poses_occupied[agent.id]])
+				
 		
 		goal_pos = agents_goal - agent.state.p_pos
-		rel_second_closest_goal = second_closest_goal - agent.state.p_pos
+		second_closest_goal = second_closest_goal - agent.state.p_pos
 
 		goal_history = np.array([goal_history])
+		# Insert preference vector for this agent type
+		agent_type = agent.agent_type  # agent type
+		preference_matrix = world.preference_matrix
+		preference_vector = preference_matrix[agent_type]
+		preference_vector = np.array(preference_vector)
 		# Add goal type information
 		matched_goal_index = self.goal_match_index[agent.id]
 		landmark_type = np.array([world.landmarks[matched_goal_index].landmark_type])
 		# Add agent_type information
-		agent_type = np.array([agent.agent_type])
-		
+		agent_type_arr = np.array([agent.agent_type])
+
+		# Compose observation, now including preference_vector, goal_pref, and goal_pref_2
 		obs_vec = np.concatenate((
-			agent.state.p_vel, agent.state.p_pos,
-			goal_pos, goal_occupied, goal_type_1,
-			rel_second_closest_goal, second_closest_goal_occupied, goal_type_2,
-			agent_type, landmark_type, goal_pref
+			agent.state.p_vel, agent.state.p_pos, preference_vector,
+			goal_pos, goal_occupied, goal_type_1, goal_pref_1.flatten(),
+			second_closest_goal, second_closest_goal_occupied, goal_type_2, goal_pref_2.flatten(),
+			agent_type_arr, landmark_type
 		))
 		# print(f"Observation for agent {agent.name}:", obs_vec)
 		return obs_vec
 
 
-		
+		# if world.dists_to_goal[agent.id] == -1:
+		# 	mean_dist,  std_dev_dist, _ = self.collect_dist(world)
+		# 	fairness_param = mean_dist/(std_dev_dist+0.0001)
+		# 	# print("mean", mean_dist, "std_dev_dist", std_dev_dist, "fairness", fairness_param)
+		# else:
+		# 	fairness_param = world.dist_traveled_mean/(world.dist_traveled_stddev+0.0001)
+		# # print("fairness_param",fairness_param)
+
+		# # ## convert fairness param to a numpy array
+		# fairness_param = np.array([fairness_param])
+		# # print("fairness_param",np.concatenate((agent.state.p_vel, agent.state.p_pos, goal_pos,goal_occupied,goal_history,fairness_param)))
+		# return np.concatenate((agent.state.p_vel, agent.state.p_pos, goal_pos,goal_occupied,goal_history,fairness_param) )# + goal_occupied+ goal_history)
+
 	def get_id(self, agent:Agent) -> arr:
 		return np.array([agent.global_id])
 
