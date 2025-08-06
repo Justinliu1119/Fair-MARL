@@ -107,7 +107,7 @@ def solve_eg_assignment(preference, cost, agent_types, goal_types, budgets=None,
     utility = np.zeros((n_agents, n_goals))
     for j in range(n_goals):
         for i in range(n_agents):
-            pref = preference[goal_types[j], agent_types[i]]
+            pref = preference[int(goal_types[j])][int(agent_types[i])]
             if pref == 0:
                 utility[j, i] = 0
             else:
