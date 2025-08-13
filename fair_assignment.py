@@ -134,7 +134,8 @@ def solve_eg_assignment(preference, cost, agent_types, goal_types, budgets=None,
         ])-0.8*penalty
     )
 
-    constraints = [cp.sum(x[:, t]) <= 1 for t in range(n_agents)]
+    constraints = [cp.sum(x[:, t]) == 1 for t in range(n_agents)]  # agent caps
+    constraints += [cp.sum(x[j, :]) == 1 for j in range(n_goals)]  # goal caps
     prob = cp.Problem(objective, constraints)
     result = prob.solve()
 
