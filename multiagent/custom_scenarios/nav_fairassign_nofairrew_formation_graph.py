@@ -254,6 +254,9 @@ class Scenario(BaseScenario):
 		# print("wall_length",wall_length)
 		self.wall_length = wall_length * self.world_size/4
 
+		# Initialize binary discovery array for exploration tracking
+		self.goal_discovered = np.zeros(self.num_agents, dtype=bool)
+
 
 
 
@@ -709,11 +712,9 @@ class Scenario(BaseScenario):
 		return min_dists
 
 	def reward(self, agent:Agent, world:World) -> float:
-	# def fairness_appended_reward(self, agent:Agent, world:World) -> float:
-
 		rew = 0
 		# Time-decaying exploration reward
-		num_goals_discovered = np.count_nonzero(self.landmark_poses_occupied >= 1.0)
+		num_goals_discovered = np.count_nonzero(self.goal_discovered)
 		fraction_discovered = num_goals_discovered / self.num_agents
 		eta_0 = 2.0
 		gamma = 0.1
@@ -724,9 +725,9 @@ class Scenario(BaseScenario):
 		nearby_goals = np.where(world.dists < self.min_obs_dist)[0]
 		newly_discovered = False
 		for goal_idx in nearby_goals:
-			if self.landmark_poses_occupied[goal_idx] == 0.0:
+			if not self.goal_discovered[goal_idx]:
+				self.goal_discovered[goal_idx] = True
 				newly_discovered = True
-				break
 		if newly_discovered:
 			rew += eta_t
 
@@ -772,7 +773,7 @@ class Scenario(BaseScenario):
 				verbose=False
 			)
 
-			# print('observations x',x, objs)
+			print('assignment x',x)
 			self.goal_match_index = np.where(x==1)[1]
 			# print("goal_match_index",self.goal_match_index)
 			if self.goal_match_index.size == 0 or self.goal_match_index.shape != (self.num_agents,):
