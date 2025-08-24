@@ -108,6 +108,12 @@ class Scenario(BaseScenario):
 		# print("use_dones", self.use_dones)
 		self.episode_length = args.episode_length
 
+		# sparse-reward toggle & hyperparameters
+		self.use_sparse_reward = getattr(args, 'use_sparse_reward', False)
+		self.rho = getattr(args, 'rho', 50.0)        # success bonus
+		self.kappa = getattr(args, 'kappa', 5.0)     # collision penalty per event
+		self.c_step = getattr(args, 'c_step', 0.01)  # small step cost
+
 		# fairness args
 		self.fair_wt = args.fair_wt
 		self.fair_rew = args.fair_rew
@@ -128,15 +134,14 @@ class Scenario(BaseScenario):
 			self.max_edge_dist = args.max_edge_dist
 		####################
 		world = World()
-		# # ------------------- Preference matrix for 2 types -------------------
-		# # Define preferences: each goal type's preference vector
-		# # Initialize preference matrix randomly (per run) with entries in [0, 10]
-		# preference_matrix = self._generate_random_preference_matrix(self.num_agent_types, self.num_landmark_types, low=0.0, high=10.0)
-		# preference_matrix = np.array(preference_matrix)
-		preference_matrix = np.array([[3.0, 2.0],
-									[2.0, 8.0]])
+		# ------------------- Preference matrix for 2 types -------------------
+		# Define preferences: each goal type's preference vector
+		preference_matrix = self._generate_random_preference_matrix(self.num_agent_types, self.num_landmark_types, low=0.0, high=3.0)
+		preference_matrix = np.array(preference_matrix)
+		# preference_matrix = np.array([[3.0, 1.0], 
+		# 								[1.0, 2.0]])
 		world.preference_matrix = preference_matrix
-		print("Preference matrix:\n", world.preference_matrix)
+		print(world.preference_matrix)
 		# Set budget: type 0 gets 2, type 1 gets 1
 		budget = [2, 1]  # Type 0 → 2, Type 1 → 1
 		world.budget = budget
@@ -254,6 +259,19 @@ class Scenario(BaseScenario):
 		# Assign landmark (goal) types
 		for i, landmark in enumerate(world.landmarks):
 			landmark.type = i % 2  # Adjust based on your number of goal types
+		# --- Re-initialize random preference matrix at the start of every episode ---
+		world.preference_matrix = np.array(
+			self._generate_random_preference_matrix(
+				self.num_agent_types,
+				self.num_landmark_types,
+				low=0.0,
+				high=3.0,
+			)
+		)
+		# Update each landmark's stored preference vector for its goal type
+		for lm in world.landmarks:
+			lm_type = getattr(lm, 'landmark_type', getattr(lm, 'type'))
+			lm.preference = world.preference_matrix[:, lm_type]
 		# metrics to keep track of
 		world.current_time_step = 0
 		# to track time required to reach goal
@@ -293,6 +311,8 @@ class Scenario(BaseScenario):
 				agent.color = np.array([0.35, 0.35, 0.85])
 			agent.state.p_dist = 0.0
 			agent.state.time = 0.0
+			# reset sparse-reward success flag
+			agent.has_gotten_goal = False
 		# set colours for scripted agents
 		for i, agent in enumerate(world.scripted_agents):
 			agent.color = np.array([0.15, 0.15, 0.15])
@@ -729,8 +749,61 @@ class Scenario(BaseScenario):
 		return min_dists
 
 	def reward(self, agent:Agent, world:World) -> float:
-	# def fairness_appended_reward(self, agent:Agent, world:World) -> float:
+		"""Two modes: (a) sparse reward with step cost & collision penalty, (b) original shaped reward.
+		Toggle via self.use_sparse_reward.
+		"""
+		# Common quantities
+		if agent.id == 0:
+			# (keep EG update frequency as before for fairness enforcement)
+			agent_pos = [ag.state.p_pos for ag in world.agents]
+			costs = dist.cdist(agent_pos, self.landmark_poses)
+			agent_type_list = [ag.agent_type for ag in world.agents]
+			goal_type_list = [gl.landmark_type for gl in world.landmarks]
+			budget = [2, 1]
+			budgets = [budget[t] for t in agent_type_list]
+			preference_matrix = world.preference_matrix
+			x, lambda_t = solve_eg_assignment(
+				preference=preference_matrix,
+				cost=costs,
+				agent_types=[ag.type for ag in world.agents],
+				goal_types=goal_type_list,
+				budgets=budgets,
+				distance_weight=0.9,
+				verbose=False
+			)
+			self.goal_match_index = np.where(x==1)[1]
+			if self.goal_match_index.size == 0 or self.goal_match_index.shape != (self.num_agents,):
+				self.goal_match_index = np.arange(self.num_agents)
 
+		# Distance to assigned (fair) goal
+		dist_to_fair_goal = np.linalg.norm(agent.state.p_pos - self.landmark_poses[self.goal_match_index[agent.id]])
+
+		# --- Sparse Reward Mode ---
+		if self.use_sparse_reward:
+			rew = 0.0
+			# Step cost to prevent dithering
+			rew -= self.c_step
+
+			# Success bonus only once when entering the goal region the first time
+			if dist_to_fair_goal < self.min_dist_thresh and not getattr(agent, 'has_gotten_goal', False):
+				agent.has_gotten_goal = True
+				rew += self.rho
+
+			# Collision penalties (agents & obstacles) for this step
+			if agent.collide:
+				# agent-agent collisions
+				for a in world.agents:
+					if a.id == agent.id:
+						continue
+					if self.is_collision(a, agent):
+						rew -= self.kappa
+				# agent-obstacle/wall collisions
+				if self.is_obstacle_collision(pos=agent.state.p_pos, entity_size=agent.size, world=world):
+					rew -= self.kappa
+
+			return np.clip(rew, -2*self.kappa, self.rho)
+
+		# --- Original Shaped Reward Mode (existing logic) ---
 		rew = 0
 		# Time-decaying exploration reward
 		num_goals_discovered = np.count_nonzero(self.landmark_poses_occupied >= 1.0)
@@ -751,99 +824,52 @@ class Scenario(BaseScenario):
 			rew += eta_t
 
 		if agent.id == 0:
-
-			##### fair assignment to check if it makes it more fair
 			agent_pos = [agent.state.p_pos for agent in world.agents]
-
 			costs = dist.cdist(agent_pos, self.landmark_poses)
-
-			# # Check if any column in costs is below min_dist_thresh
-			# mask = np.any(costs < self.min_dist_thresh, axis=0)
-
-			# # Update only the relevant indices in landmark_poses_occupied
-			# self.landmark_poses_occupied[mask] = 1.0
-			# -------------------------------------
-
-			
-			agent_type_list = [agent.agent_type for agent in world.agents]
-			goal_type_list = [goal.landmark_type for goal in world.landmarks]
-			
-			# Use budget according to agent type
-			budget = [2, 1]  # Type 0 → 2, Type 1 → 1
-			budgets = [budget[agent_type] for agent_type in agent_type_list]
+			agent_type_list = [ag.agent_type for ag in world.agents]
+			goal_type_list = [gl.landmark_type for gl in world.landmarks]
+			budget = [2, 1]
+			budgets = [budget[t] for t in agent_type_list]
 			preference_matrix = world.preference_matrix
-
-			# dist_matrix = np.linalg.norm(
-			# np.array([agent.state.p_pos for agent in world.agents])[:, None, :] -
-			# np.array([goal.state.p_pos for goal in world.landmarks])[None, :, :],
-			# axis=2
-			# )
-			costs = dist.cdist(agent_pos, self.landmark_poses)
 			x, lambda_t = solve_eg_assignment(
 				preference=preference_matrix,
 				cost=costs,
-				agent_types=[agent.type for agent in world.agents],
+				agent_types=[ag.type for ag in world.agents],
 				goal_types=goal_type_list,
 				budgets=budgets,
 				distance_weight=0.9,
 				verbose=False
 			)
-
-			# print('observations x',x, objs)
 			self.goal_match_index = np.where(x==1)[1]
-			# print("goal_match_index",self.goal_match_index)
 			if self.goal_match_index.size == 0 or self.goal_match_index.shape != (self.num_agents,):
 				self.goal_match_index = np.arange(self.num_agents)
-		dist_to_fair_goal = np.linalg.norm(agent.state.p_pos - self.landmark_poses[self.goal_match_index[agent.id]])
 
 		if dist_to_fair_goal < self.min_dist_thresh:
-			# print("AGENT",agent.id,"reached goal")
-			if agent.status ==False:
+			if agent.status == False:
 				agent.status = True
-				agent.state.p_vel[0]=0.0
-				agent.state.p_vel[1]=0.0
-				# print("AGENT",agent.id,"goal_rew","{:.3f}".format(self.goal_rew))
+				agent.state.p_vel[0] = 0.0
+				agent.state.p_vel[1] = 0.0
 				rew += self.goal_rew
-
-				# ------------------ Preference alignment bonus ------------------ #
-				# Reward the agent if the goal's type matches its highest preference index
-				agent_type = agent.agent_type  # assuming agent.agent_type is defined for each agent
+				# Preference alignment bonus
+				agent_type = agent.agent_type
 				chosen_goal = self.goal_match_index[agent.id]
-				goal_type = world.landmarks[chosen_goal].landmark_type  # assuming landmark_type is stored for each goal
-				# Preference matrix: shape (num_agent_types, num_landmark_types)
-				# Get the preference vector for this agent's type
+				goal_type = world.landmarks[chosen_goal].landmark_type
 				agent_pref_vector = world.preference_matrix[agent_type]
-				preferred_goal_type = np.argmax(agent_pref_vector)  # most preferred goal type
-
+				preferred_goal_type = np.argmax(agent_pref_vector)
 				if goal_type == preferred_goal_type:
-					rew += 1.0  # bonus for choosing top-preference goal
+					rew += 1.0
 		else:
-			# # print("delta_dists",self.delta_dists[agent.id])
-			# world.dists = np.array([np.linalg.norm(agent.state.p_pos - l) for l in self.landmark_poses])
-			# if np.min(world.dists) < self.min_dist_thresh:
-			# 	if agent.status ==False:
-			# 		# print("AGENT",agent.id,"reached wrong goal",np.min(world.dists))
-			# 		agent.status = True
-			# 		agent.state.p_vel[0]=0.0
-			# 		agent.state.p_vel[1]=0.0
-			# 		rew -= dist_to_fair_goal
-			# else:
-				rew -= dist_to_fair_goal
+			rew -= dist_to_fair_goal
+
 		if agent.collide:
 			for a in world.agents:
-				# do not consider collision with itself
 				if a.id == agent.id:
 					continue
 				if self.is_collision(a, agent):
 					rew -= self.collision_rew
-					# print("agent", agent.id,"collision", a.id,"rew",self.collision_rew)
-					# print("rew",rew)
-					# input("collision")
-
-			if self.is_obstacle_collision(pos=agent.state.p_pos,
-										entity_size=agent.size, world=world):
+			if self.is_obstacle_collision(pos=agent.state.p_pos, entity_size=agent.size, world=world):
 				rew -= self.collision_rew
-		
+
 		return np.clip(rew, -2*self.collision_rew, self.goal_rew+self.fair_rew)
 	
 	# def observation(self, agent:Agent, world:World) -> arr:
@@ -1318,6 +1344,11 @@ if __name__ == "__main__":
 			self.graph_feat_type:str='relative'
 			self.fair_wt=1
 			self.fair_rew=1
+			# sparse reward settings (off by default for back-compat)
+			self.use_sparse_reward = False
+			self.rho = 50.0
+			self.kappa = 5.0
+			self.c_step = 0.01
 	args = Args()
 
 	scenario = Scenario()
