@@ -24,6 +24,26 @@ from multiagent.scenario import BaseScenario
 entity_mapping = {'agent': 0, 'landmark': 1, 'obstacle':2, 'wall':3}
 
 class Scenario(BaseScenario):
+
+	def _generate_random_preference_matrix(self, num_agent_types: int, num_landmark_types: int, low: float = 0.0, high: float = 10.0) -> np.ndarray:
+		"""
+		Return a (num_agent_types x num_landmark_types) preference matrix with entries in [low, high],
+		ensuring each goal type (column) is liked by at least one agent type (>0) and each agent type (row)
+		likes at least one goal type (>0).
+		"""
+		pref = np.random.uniform(low, high, size=(num_agent_types, num_landmark_types))
+		# Ensure at least one positive entry per column (goal liked by ≥1 agent type)
+		for j in range(num_landmark_types):
+			if not np.any(pref[:, j] > 0.0):
+				i = np.random.randint(0, num_agent_types)
+				pref[i, j] = np.random.uniform(max(1e-6, low), high)
+		# Ensure at least one positive entry per row (each agent type likes ≥1 goal type)
+		for i in range(num_agent_types):
+			if not np.any(pref[i, :] > 0.0):
+				j = np.random.randint(0, num_landmark_types)
+				pref[i, j] = np.random.uniform(max(1e-6, low), high)
+		return pref
+
 	def make_world(self, args:argparse.Namespace) -> World:
 		# Ensure num_targets_per_type is defined
 		args.num_targets_per_type = args.num_landmarks // 2
@@ -110,9 +130,12 @@ class Scenario(BaseScenario):
 		world = World()
 		# ------------------- Preference matrix for 2 types -------------------
 		# Define preferences: each goal type's preference vector
-		preference_matrix = np.array([[3.0, 0.0], 
-										[0.0, 2.0]])
+		preference_matrix = self._generate_random_preference_matrix(self.num_agent_types, self.num_landmark_types, low=0.0, high=3.0)
+		preference_matrix = np.array(preference_matrix)
+		# preference_matrix = np.array([[3.0, 1.0], 
+		# 								[1.0, 2.0]])
 		world.preference_matrix = preference_matrix
+		print(world.preference_matrix)
 		# Set budget: type 0 gets 2, type 1 gets 1
 		budget = [2, 1]  # Type 0 → 2, Type 1 → 1
 		world.budget = budget
@@ -230,6 +253,19 @@ class Scenario(BaseScenario):
 		# Assign landmark (goal) types
 		for i, landmark in enumerate(world.landmarks):
 			landmark.type = i % 2  # Adjust based on your number of goal types
+		# --- Re-initialize random preference matrix at the start of every episode ---
+		world.preference_matrix = np.array(
+			self._generate_random_preference_matrix(
+				self.num_agent_types,
+				self.num_landmark_types,
+				low=0.0,
+				high=3.0,
+			)
+		)
+		# Update each landmark's stored preference vector for its goal type
+		for lm in world.landmarks:
+			lm_type = getattr(lm, 'landmark_type', getattr(lm, 'type'))
+			lm.preference = world.preference_matrix[:, lm_type]
 		# metrics to keep track of
 		world.current_time_step = 0
 		# to track time required to reach goal
@@ -253,9 +289,6 @@ class Scenario(BaseScenario):
 		wall_length = np.random.uniform(0.2, 0.8)
 		# print("wall_length",wall_length)
 		self.wall_length = wall_length * self.world_size/4
-
-		# Initialize binary discovery array for exploration tracking
-		self.goal_discovered = np.zeros(self.num_agents, dtype=bool)
 
 
 
@@ -467,11 +500,7 @@ class Scenario(BaseScenario):
 		# reset
 		########### set fair goals for each agent ###########
 		# Define variables for assignment
-		preference_matrix = np.array([
-			[3.0, 0.0],
-			[0.0, 2.0]
-		])
-
+		preference_matrix = world.preference_matrix
 		
 		agent_type_list = [agent.agent_type for agent in world.agents]
 		goal_type_list = [goal.landmark_type for goal in world.landmarks]
@@ -712,9 +741,11 @@ class Scenario(BaseScenario):
 		return min_dists
 
 	def reward(self, agent:Agent, world:World) -> float:
+	# def fairness_appended_reward(self, agent:Agent, world:World) -> float:
+
 		rew = 0
 		# Time-decaying exploration reward
-		num_goals_discovered = np.count_nonzero(self.goal_discovered)
+		num_goals_discovered = np.count_nonzero(self.landmark_poses_occupied >= 1.0)
 		fraction_discovered = num_goals_discovered / self.num_agents
 		eta_0 = 2.0
 		gamma = 0.1
@@ -725,9 +756,9 @@ class Scenario(BaseScenario):
 		nearby_goals = np.where(world.dists < self.min_obs_dist)[0]
 		newly_discovered = False
 		for goal_idx in nearby_goals:
-			if not self.goal_discovered[goal_idx]:
-				self.goal_discovered[goal_idx] = True
+			if self.landmark_poses_occupied[goal_idx] == 0.0:
 				newly_discovered = True
+				break
 		if newly_discovered:
 			rew += eta_t
 
@@ -752,10 +783,7 @@ class Scenario(BaseScenario):
 			# Use budget according to agent type
 			budget = [2, 1]  # Type 0 → 2, Type 1 → 1
 			budgets = [budget[agent_type] for agent_type in agent_type_list]
-			preference_matrix = np.array([
-			[3.0, 0.0],
-			[0.0, 2.0]
-			])
+			preference_matrix = world.preference_matrix
 
 			# dist_matrix = np.linalg.norm(
 			# np.array([agent.state.p_pos for agent in world.agents])[:, None, :] -
@@ -773,7 +801,7 @@ class Scenario(BaseScenario):
 				verbose=False
 			)
 
-			print('assignment x',x)
+			# print('observations x',x, objs)
 			self.goal_match_index = np.where(x==1)[1]
 			# print("goal_match_index",self.goal_match_index)
 			if self.goal_match_index.size == 0 or self.goal_match_index.shape != (self.num_agents,):

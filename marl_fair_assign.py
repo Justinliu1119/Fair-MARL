@@ -156,7 +156,7 @@ def solve_eg_assignment(preference, cost, agent_types, goal_types, budgets=None,
     print("Dual variable values (prices):", lambda_t)
     x_onehot = x_onehot.T  # Transpose to match (n_goals, n_agents) shape
 
-    return x_onehot, lambda_t
+    return x_onehot
 
 if __name__=='__main__':
     # n = 10

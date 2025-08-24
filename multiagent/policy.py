@@ -50,3 +50,17 @@ class InteractivePolicy(Policy):
         if k==key.RIGHT: self.move[1] = False
         if k==key.UP:    self.move[2] = False
         if k==key.DOWN:  self.move[3] = False
+
+class RandomPolicy(Policy):
+    def __init__(self, env, agent_index):
+        super(RandomPolicy, self).__init__()
+        self.env = env
+        self.n_actions = 5 + env.world.dim_c
+
+    def action(self, obs):
+        if self.env.discrete_action_input:
+            return np.random.randint(0, self.n_actions)
+        else:
+            action = np.zeros(self.n_actions)
+            action[np.random.randint(0, self.n_actions)] = 1
+            return action

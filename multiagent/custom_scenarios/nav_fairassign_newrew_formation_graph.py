@@ -24,6 +24,26 @@ from multiagent.scenario import BaseScenario
 entity_mapping = {'agent': 0, 'landmark': 1, 'obstacle':2, 'wall':3}
 
 class Scenario(BaseScenario):
+
+	def _generate_random_preference_matrix(self, num_agent_types: int, num_landmark_types: int, low: float = 0.0, high: float = 10.0) -> np.ndarray:
+		"""
+		Return a (num_agent_types x num_landmark_types) preference matrix with entries in [low, high],
+		ensuring each goal type (column) is liked by at least one agent type (>0) and each agent type (row)
+		likes at least one goal type (>0).
+		"""
+		pref = np.random.uniform(low, high, size=(num_agent_types, num_landmark_types))
+		# Ensure at least one positive entry per column (goal liked by ≥1 agent type)
+		for j in range(num_landmark_types):
+			if not np.any(pref[:, j] > 0.0):
+				i = np.random.randint(0, num_agent_types)
+				pref[i, j] = np.random.uniform(max(1e-6, low), high)
+		# Ensure at least one positive entry per row (each agent type likes ≥1 goal type)
+		for i in range(num_agent_types):
+			if not np.any(pref[i, :] > 0.0):
+				j = np.random.randint(0, num_landmark_types)
+				pref[i, j] = np.random.uniform(max(1e-6, low), high)
+		return pref
+
 	def make_world(self, args:argparse.Namespace) -> World:
 		# Ensure num_targets_per_type is defined
 		args.num_targets_per_type = args.num_landmarks // 2
@@ -88,10 +108,6 @@ class Scenario(BaseScenario):
 		# print("use_dones", self.use_dones)
 		self.episode_length = args.episode_length
 
-		# --- Moving goals configuration ---
-		self.moving_goals = getattr(args, 'moving_goals', True)
-		self.goal_speed = float(getattr(args, 'goal_speed', 0.3))
-
 		# fairness args
 		self.fair_wt = args.fair_wt
 		self.fair_rew = args.fair_rew
@@ -112,14 +128,15 @@ class Scenario(BaseScenario):
 			self.max_edge_dist = args.max_edge_dist
 		####################
 		world = World()
-		# propagate moving-goal flags to world
-		world.moving_goals = self.moving_goals
-		world.goal_speed = self.goal_speed
-		# ------------------- Preference matrix for 2 types -------------------
-		# Define preferences: each goal type's preference vector
-		preference_matrix = np.array([[3.0, 0.0], 
-										[0.0, 2.0]])
+		# # ------------------- Preference matrix for 2 types -------------------
+		# # Define preferences: each goal type's preference vector
+		# # Initialize preference matrix randomly (per run) with entries in [0, 10]
+		# preference_matrix = self._generate_random_preference_matrix(self.num_agent_types, self.num_landmark_types, low=0.0, high=10.0)
+		# preference_matrix = np.array(preference_matrix)
+		preference_matrix = np.array([[3.0, 2.0],
+									[2.0, 8.0]])
 		world.preference_matrix = preference_matrix
+		print("Preference matrix:\n", world.preference_matrix)
 		# Set budget: type 0 gets 2, type 1 gets 1
 		budget = [2, 1]  # Type 0 → 2, Type 1 → 1
 		world.budget = budget
@@ -456,16 +473,6 @@ class Scenario(BaseScenario):
 		self.landmark_poses = np.array([landmark.state.p_pos for landmark in world.landmarks])
 		self.landmark_poses_occupied = np.zeros(self.num_agents)
 
-		# --- initialize goal velocities (moving goals) ---
-		for landmark in world.landmarks:
-			if getattr(world, 'moving_goals', False):
-				theta = np.random.uniform(0.0, 2*np.pi)
-				landmark.state.p_vel = world.goal_speed * np.array([np.cos(theta), np.sin(theta)])
-				landmark.movable = True
-			else:
-				landmark.state.p_vel = np.zeros(world.dim_p)
-				landmark.movable = False
-
 		#####################################################
 
 		############ find minimum times to goals ############
@@ -481,11 +488,7 @@ class Scenario(BaseScenario):
 		# reset
 		########### set fair goals for each agent ###########
 		# Define variables for assignment
-		preference_matrix = np.array([
-			[3.0, 0.0],
-			[0.0, 2.0]
-		])
-
+		preference_matrix = world.preference_matrix
 		
 		agent_type_list = [agent.agent_type for agent in world.agents]
 		goal_type_list = [goal.landmark_type for goal in world.landmarks]
@@ -685,32 +688,6 @@ class Scenario(BaseScenario):
 				break
 		return collision
 
-	def move_goals(self, world: World) -> None:
-		"""Move landmark goals by their velocities with boundary/obstacle bounce, then refresh caches."""
-		if not getattr(world, 'moving_goals', False):
-			return
-		half = self.world_size / 2.0
-		for lm in world.landmarks:
-			# propose next position
-			next_pos = lm.state.p_pos + lm.state.p_vel * world.dt
-			# bounce on world boundaries
-			for axis in (0, 1):
-				if next_pos[axis] > half:
-					next_pos[axis] = half - (next_pos[axis] - half)
-					lm.state.p_vel[axis] *= -1
-				elif next_pos[axis] < -half:
-					next_pos[axis] = -half - (next_pos[axis] + half)
-					lm.state.p_vel[axis] *= -1
-			# simple bounce on obstacles
-			if self.is_obstacle_collision(next_pos, lm.size, world):
-				lm.state.p_vel *= -1
-				next_pos = lm.state.p_pos + lm.state.p_vel * world.dt
-			lm.state.p_pos = next_pos
-		# refresh cached landmark positions and graph/distances
-		self.landmark_poses = np.array([l.state.p_pos for l in world.landmarks])
-		world.calculate_distances()
-		self.update_graph(world)
-
 	# get min time required to reach to goal without obstacles
 	def min_time(self, agent:Agent, world:World) -> float:
 		assert agent.max_speed is not None, "Agent needs to have a max_speed"
@@ -755,9 +732,6 @@ class Scenario(BaseScenario):
 	# def fairness_appended_reward(self, agent:Agent, world:World) -> float:
 
 		rew = 0
-		# move goals once per environment step (guarded by agent 0)
-		if agent.id == 0:
-			self.move_goals(world)
 		# Time-decaying exploration reward
 		num_goals_discovered = np.count_nonzero(self.landmark_poses_occupied >= 1.0)
 		fraction_discovered = num_goals_discovered / self.num_agents
@@ -797,10 +771,7 @@ class Scenario(BaseScenario):
 			# Use budget according to agent type
 			budget = [2, 1]  # Type 0 → 2, Type 1 → 1
 			budgets = [budget[agent_type] for agent_type in agent_type_list]
-			preference_matrix = np.array([
-			[3.0, 0.0],
-			[0.0, 2.0]
-			])
+			preference_matrix = world.preference_matrix
 
 			# dist_matrix = np.linalg.norm(
 			# np.array([agent.state.p_pos for agent in world.agents])[:, None, :] -
@@ -1347,8 +1318,6 @@ if __name__ == "__main__":
 			self.graph_feat_type:str='relative'
 			self.fair_wt=1
 			self.fair_rew=1
-			self.moving_goals: bool = True
-			self.goal_speed: float = 0.3
 	args = Args()
 
 	scenario = Scenario()

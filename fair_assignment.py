@@ -119,7 +119,8 @@ def solve_eg_assignment(preference, cost, agent_types, goal_types, budgets=None,
             if is_zero:
                 utility[j, i] = 0
             else:
-                utility[j, i] = pref_val - distance_weight * cost[i, j]
+                val = pref_val - distance_weight * cost[i, j]
+                utility[j, i] = val if val >= 0 else 0
         if budgets is None:
             budgets = np.ones(n_agents)
 
@@ -183,4 +184,3 @@ if __name__=='__main__':
     x, objs = solve_fair_assignment(costs)
     # print(x)
     # print(objs)
-    
