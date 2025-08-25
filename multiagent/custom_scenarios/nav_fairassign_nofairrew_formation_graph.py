@@ -25,24 +25,13 @@ entity_mapping = {'agent': 0, 'landmark': 1, 'obstacle':2, 'wall':3}
 
 class Scenario(BaseScenario):
 
-	def _generate_random_preference_matrix(self, num_agent_types: int, num_landmark_types: int, low: float = 0.0, high: float = 10.0) -> np.ndarray:
+	def _generate_random_preference_matrix(self, num_agent_types: int, num_landmark_types: int, low: int = 1, high: int = 10) -> np.ndarray:
 		"""
-		Return a (num_agent_types x num_landmark_types) preference matrix with entries in [low, high],
-		ensuring each goal type (column) is liked by at least one agent type (>0) and each agent type (row)
-		likes at least one goal type (>0).
+		Return a (num_agent_types x num_landmark_types) integer preference matrix with entries in [low, high],
+		inclusive. This guarantees every entry is >= 1 to avoid zero-utility rows/columns.
 		"""
-		pref = np.random.uniform(low, high, size=(num_agent_types, num_landmark_types))
-		# Ensure at least one positive entry per column (goal liked by ≥1 agent type)
-		for j in range(num_landmark_types):
-			if not np.any(pref[:, j] > 0.0):
-				i = np.random.randint(0, num_agent_types)
-				pref[i, j] = np.random.uniform(max(1e-6, low), high)
-		# Ensure at least one positive entry per row (each agent type likes ≥1 goal type)
-		for i in range(num_agent_types):
-			if not np.any(pref[i, :] > 0.0):
-				j = np.random.randint(0, num_landmark_types)
-				pref[i, j] = np.random.uniform(max(1e-6, low), high)
-		return pref
+		# np.random.randint upper bound is exclusive, so use high + 1
+		return np.random.randint(low, high + 1, size=(num_agent_types, num_landmark_types))
 
 	def make_world(self, args:argparse.Namespace) -> World:
 		# Ensure num_targets_per_type is defined
@@ -130,7 +119,7 @@ class Scenario(BaseScenario):
 		world = World()
 		# ------------------- Preference matrix for 2 types -------------------
 		# Define preferences: each goal type's preference vector
-		preference_matrix = self._generate_random_preference_matrix(self.num_agent_types, self.num_landmark_types, low=0.0, high=3.0)
+		preference_matrix = self._generate_random_preference_matrix(self.num_agent_types, self.num_landmark_types, low=1, high=10)
 		preference_matrix = np.array(preference_matrix)
 		# preference_matrix = np.array([[3.0, 1.0], 
 		# 								[1.0, 2.0]])
@@ -258,8 +247,8 @@ class Scenario(BaseScenario):
 			self._generate_random_preference_matrix(
 				self.num_agent_types,
 				self.num_landmark_types,
-				low=0.0,
-				high=3.0,
+				low=1,
+				high=3,
 			)
 		)
 		# Update each landmark's stored preference vector for its goal type
